@@ -26,30 +26,67 @@ import kotlin.io.path.createDirectories
  */
 open class LocalSandboxFs(roots: List<SandboxRoot>) : SandboxFs {
 
-    private val roots: List<SandboxRoot>
-    private val realRootDirs: List<Path>
+    /** 根表快照：授权根与真实目录一一对应，替换时整体发布。 */
+    private data class RootTable(val roots: List<SandboxRoot>, val realDirs: List<Path>)
+
+    @Volatile
+    private var table: RootTable = RootTable(emptyList(), emptyList())
 
     init {
         require(roots.isNotEmpty()) { "至少需要一个授权根" }
         require(roots.map { it.id }.distinct().size == roots.size) { "授权根 id 重复" }
-        roots.forEach { root ->
-            require(root.id.isNotEmpty() && root.id.none { it == '/' || it == '\\' || it == '.' }) {
-                "非法授权根 id: " + root.id
+        roots.forEach(::validateRoot)
+        table = RootTable(roots, roots.map { it.directory.toRealPath() })
+    }
+
+    /**
+     * 动态挂载授权根：id 已存在时原位替换（旧目录立即解除挂载），否则追加到末尾。
+     *
+     * 默认根（首个授权根）承载私有目录，不允许替换；解析始终读取完整快照，
+     * 并发调用不会看到根列表与真实目录错位。
+     *
+     * @return 被替换的旧根；新增根返回 null
+     */
+    @Synchronized
+    fun addRoot(root: SandboxRoot): SandboxRoot? {
+        validateRoot(root)
+        val current = table
+        require(root.id != current.roots.first().id) { "默认授权根不可替换: " + root.id }
+        val realDir = root.directory.toRealPath()
+        val nextRoots = current.roots.toMutableList()
+        val nextRealDirs = current.realDirs.toMutableList()
+        val index = nextRoots.indexOfFirst { it.id == root.id }
+        val replaced = if (index >= 0) {
+            nextRoots[index].also {
+                nextRoots[index] = root
+                nextRealDirs[index] = realDir
             }
-            require(Files.isDirectory(root.directory)) { "授权根目录不存在: " + root.directory }
+        } else {
+            nextRoots.add(root)
+            nextRealDirs.add(realDir)
+            null
         }
-        this.roots = roots
-        this.realRootDirs = roots.map { it.directory.toRealPath() }
+        table = RootTable(nextRoots, nextRealDirs)
+        return replaced
+    }
+
+    private fun validateRoot(root: SandboxRoot) {
+        require(root.id.isNotEmpty() && root.id.none { it == '/' || it == '\\' || it == '.' }) {
+            "非法授权根 id: " + root.id
+        }
+        require(Files.isDirectory(root.directory)) { "授权根目录不存在: " + root.directory }
     }
 
     override suspend fun resolve(path: String): ResolvedPath {
+        val snapshot = table
         val segments = parseSegments(path)
-        val rootIndex = roots.indexOfFirst { segments.isNotEmpty() && it.id == segments.first() }
-        val root = if (rootIndex >= 0) roots[rootIndex] else roots.first()
-        val relSegments = if (rootIndex >= 0) segments.drop(1) else segments
+        val matchedIndex = snapshot.roots.indexOfFirst { segments.isNotEmpty() && it.id == segments.first() }
+        val rootIndex = if (matchedIndex >= 0) matchedIndex else 0
+        val root = snapshot.roots[rootIndex]
+        val relSegments = if (matchedIndex >= 0) segments.drop(1) else segments
         val rel = relSegments.joinToString("/")
         val abs = root.directory.resolve(rel).normalize()
-        ensureInsideRoot(root, abs, path)
+        ensureInsideRoot(snapshot, rootIndex, abs, path)
         return ResolvedPath(root, rel, abs)
     }
 
@@ -162,12 +199,12 @@ open class LocalSandboxFs(roots: List<SandboxRoot>) : SandboxFs {
     }
 
     /** 词法归一 + 真实路径双重校验；已存在部分解析符号链接后必须仍在根内。 */
-    private fun ensureInsideRoot(root: SandboxRoot, abs: Path, original: String) {
+    private fun ensureInsideRoot(snapshot: RootTable, rootIndex: Int, abs: Path, original: String) {
+        val root = snapshot.roots[rootIndex]
         if (!abs.startsWith(root.directory)) {
             throw SandboxPathException("路径越界: " + original)
         }
-        val rootIndex = roots.indexOf(root)
-        val realRoot = realRootDirs[rootIndex]
+        val realRoot = snapshot.realDirs[rootIndex]
         var existing = abs
         val tail = ArrayDeque<String>()
         while (!Files.exists(existing)) {

@@ -19,7 +19,8 @@ import com.thatgfsj.qaa.core.tools.WriteTool
  * 工具执行端口适配（HarnessPorts.ToolExecutorGateway ⇄ core-tools 四原语工具）。
  *
  * 每次执行按 Agent Loop 传入的 [ToolCall] 与工具步序号构造 [ToolContext]：
- * sessionId 固定当前会话、sandbox 为 App 私有目录授权根、limits 取默认截断预算。
+ * sessionId 固定当前会话、sandbox 为 App 私有目录默认授权根（外部目录可动态挂载）、
+ * limits 取默认截断预算。
  * 确认需求由工具自身声明（read=false；write/edit/draw_image=true），Loop 据此走确认门。
  */
 class ToolRouterGateway(

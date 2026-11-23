@@ -14,7 +14,8 @@ import kotlinx.coroutines.launch
  * 分发分两类：
  * - 视图副作用（清屏 / 模式 / 模型 / 后端 / start window）同步执行，保证回显顺序稳定；
  * - 命令执行体（prompt 轮次、/tree、/fork、/compact、/skills、/status 明细、model pull）
- *   经 [scope] 异步执行，结果以中文行追加到对话区，不阻塞输入行。
+ *   经 [scope] 异步执行，结果以中文行追加到对话区，不阻塞输入行；
+ * - 系统选择器类命令（model import、storage grant）转交宿主回调，选择结果仍由宿主回显。
  *
  * 纯 Kotlin：Android 侧只注入端口实现与回调，便于 JVM 集成单测。
  */
@@ -26,6 +27,8 @@ class TerminalShellController(
     private val agent: TerminalAgentPort? = null,
     private val modelList: TerminalModelListPort? = null,
     private val modelPull: TerminalModelPullPort? = null,
+    private val onRequestModelImport: () -> Unit = {},
+    private val onRequestStorageGrant: () -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) {
 
@@ -94,6 +97,8 @@ class TerminalShellController(
             }
             is ShellEffect.ForwardPrompt -> forwardPrompt(effect.text)
             ShellEffect.StartNormalWindow -> onStartNormalWindow()
+            ShellEffect.ImportModel -> onRequestModelImport()
+            ShellEffect.GrantStorage -> onRequestStorageGrant()
             is ShellEffect.PullModel -> pullModel(effect.url)
             ShellEffect.QueryTree -> query { required(it.tree()) }
             is ShellEffect.ForkNode -> query { required(it.fork(effect.nodeId)) }
@@ -190,8 +195,8 @@ class TerminalShellController(
         }
     }
 
-    /** 从模型清单端口刷新快照（失败保持旧快照，不影响命令可用性）。 */
-    private fun refreshModels() {
+    /** 从模型清单端口刷新快照（失败保持旧快照，不影响命令可用性）。导入完成后由宿主调用。 */
+    fun refreshModels() {
         val port = modelList ?: return
         scope.launch {
             val entries = try {

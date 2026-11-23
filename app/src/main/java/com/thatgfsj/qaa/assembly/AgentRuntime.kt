@@ -1,6 +1,7 @@
 package com.thatgfsj.qaa.assembly
 
 import android.content.Context
+import android.net.Uri
 import com.thatgfsj.qaa.core.harness.AgentConfig
 import com.thatgfsj.qaa.core.harness.AgentLoop
 import com.thatgfsj.qaa.core.harness.CompactionResult
@@ -21,6 +22,7 @@ import com.thatgfsj.qaa.core.inference.AndroidAssetSource
 import com.thatgfsj.qaa.core.inference.AssetModelReleaser
 import com.thatgfsj.qaa.core.inference.CatalogEntry
 import com.thatgfsj.qaa.core.inference.ComputeBackend
+import com.thatgfsj.qaa.core.inference.ContentResolverDocument
 import com.thatgfsj.qaa.core.inference.DefaultGenieXModelGateway
 import com.thatgfsj.qaa.core.inference.GenieXLlmEngine
 import com.thatgfsj.qaa.core.inference.GenieXLlmSessionFactory
@@ -38,7 +40,6 @@ import com.thatgfsj.qaa.core.inference.ModelSource
 import com.thatgfsj.qaa.core.inference.RegisteredModel
 import com.thatgfsj.qaa.core.tools.DrawImageTool
 import com.thatgfsj.qaa.core.tools.LocalSandboxFs
-import com.thatgfsj.qaa.core.tools.SandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
@@ -66,6 +67,7 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * 端到端 Agent 运行装配（Issue #10 / #11 装配遗留 + Issue #19 执行体接线）。
@@ -75,7 +77,8 @@ import kotlinx.coroutines.sync.withLock
  *
  * 端口适配（依赖倒置，组件本体零改动）：
  * - [LlmGatewayAdapter]：GenieX 流 → HarnessPorts.LlmEngineGateway + 统计栏指标；
- * - [ToolRouterGateway]：四原语工具经 [LocalSandboxFs] 执行，filesDir 为授权根；
+ * - [ToolRouterGateway]：四原语工具经 [LocalSandboxFs] 执行，filesDir 为默认授权根，
+ *   外部目录经 storage grant 动态挂载；
  * - [RecordingTurnRecorder]：树状 JSONL 落盘 + 压缩视图作为提示历史；
  * - [SteerQueue] 同时接 Loop 的工具步边界与确认挂起竞速（L7），由 [SteerTurnDriver] 驱动轮次；
  * - [ContextCompactor] 在工具步边界与轮末两个安全点自动检查，/compact 走手动入口；
@@ -105,8 +108,9 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val releaser = AssetModelReleaser(AndroidAssetSource(appContext), modelsDir)
     private val catalog = ModelCatalog(modelsDir, DefaultGenieXModelGateway)
     private val pullClient = ModelPullClient()
-    private val sandbox: SandboxFs =
-        LocalSandboxFs(listOf(SandboxRoot(SANDBOX_ROOT_ID, filesDir.toPath())))
+    private val sandbox = LocalSandboxFs(listOf(SandboxRoot(SANDBOX_ROOT_ID, filesDir.toPath())))
+    private val storageGrant = StorageGrant(appContext, sandbox)
+    private val modelImport = ModelImportCoordinator(modelsDir, catalog)
 
     private val sessionStore = TreeSessionStore(
         sessionId = SESSION_ID,
@@ -329,6 +333,17 @@ class AgentRuntime private constructor(private val appContext: Context) :
         }
     }
 
+    // ---- 系统选择器接线 ----
+
+    /** model import：把所选文档复制进模型目录、登记清单并返回中文结果。 */
+    suspend fun importModel(uri: Uri): String =
+        modelImport.import(ContentResolverDocument(appContext.contentResolver, uri))
+
+    /** storage grant：持久化目录授权并挂载为沙盒的 ext 根，返回中文结果。 */
+    suspend fun mountStorageGrant(uri: Uri): String = withContext(Dispatchers.IO) {
+        storageGrant.mount(uri)
+    }
+
     // ---- 内部执行 ----
 
     private suspend fun executeTurn(text: String) = turnMutex.withLock {
@@ -358,6 +373,8 @@ class AgentRuntime private constructor(private val appContext: Context) :
         }
         _state.value = TerminalAgentState.PREPARING
         try {
+            // 恢复上次外部目录授权；失败只影响 ext 根挂载，不阻断启动链。
+            runCatching { storageGrant.restore() }
             _status.value = "正在释放内置模型资源…"
             val released = releaser.releaseAll()
             _status.value = "正在初始化推理 SDK…"

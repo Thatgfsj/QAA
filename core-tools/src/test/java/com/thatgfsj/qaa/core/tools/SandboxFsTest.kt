@@ -3,6 +3,7 @@ package com.thatgfsj.qaa.core.tools
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -131,6 +132,73 @@ class SandboxFsTest {
         assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext/g.txt").absolutePath.parent.toRealPath())
         assertEquals(main.toPath().toRealPath(), sandbox.resolve("f.txt").absolutePath.parent.toRealPath())
         assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext").absolutePath.toRealPath())
+    }
+
+    @Test
+    fun addRootMountsNewRootAndReplacesSameId() = runBlocking {
+        val main = tmp.newFolder("main")
+        val first = tmp.newFolder("ext-first")
+        val second = tmp.newFolder("ext-second")
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
+
+        assertNull(sandbox.addRoot(SandboxRoot("ext", first.toPath())))
+        sandbox.writeText("ext/a.txt", "外部")
+        assertEquals("外部", sandbox.readText("ext/a.txt", 10))
+        assertEquals(
+            first.toPath().toRealPath(),
+            sandbox.resolve("ext/a.txt").absolutePath.parent.toRealPath(),
+        )
+
+        val replaced = sandbox.addRoot(SandboxRoot("ext", second.toPath()))
+        assertEquals(first.toPath().toRealPath(), replaced!!.directory.toRealPath())
+        assertFalse(sandbox.exists("ext/a.txt"))
+        sandbox.writeText("ext/b.txt", "新根")
+        assertEquals(
+            second.toPath().toRealPath(),
+            sandbox.resolve("ext/b.txt").absolutePath.parent.toRealPath(),
+        )
+        assertEquals(
+            main.toPath().toRealPath(),
+            sandbox.resolve("a.txt").absolutePath.parent.toRealPath(),
+        )
+    }
+
+    @Test
+    fun addRootKeepsEscapeGuardsThroughMountedRoot() {
+        val main = tmp.newFolder("main")
+        val ext = tmp.newFolder("ext")
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
+        sandbox.addRoot(SandboxRoot("ext", ext.toPath()))
+        try {
+            runBlocking { sandbox.resolve("ext/../escape.txt") }
+            fail("授权根内的 '..' 应当被拒绝")
+        } catch (_: SandboxPathException) {
+        }
+        val outside = tmp.newFolder("outside")
+        val secret = File(outside, "secret.txt").apply { writeText("secret") }
+        Files.createSymbolicLink(File(ext, "leak").toPath(), secret.toPath())
+        try {
+            runBlocking { sandbox.resolve("ext/leak") }
+            fail("挂载根内的符号链接逃逸应当被拒绝")
+        } catch (_: SandboxPathException) {
+        }
+    }
+
+    @Test
+    fun addRootRejectsDefaultRootReplacementAndMissingDirectory() {
+        val main = tmp.newFolder("main")
+        val other = tmp.newFolder("other")
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
+        try {
+            sandbox.addRoot(SandboxRoot("main", other.toPath()))
+            fail("默认授权根不可替换")
+        } catch (_: IllegalArgumentException) {
+        }
+        try {
+            sandbox.addRoot(SandboxRoot("ext", File(main, "missing").toPath()))
+            fail("不存在的授权根应当被拒绝")
+        } catch (_: IllegalArgumentException) {
+        }
     }
 
     @Test

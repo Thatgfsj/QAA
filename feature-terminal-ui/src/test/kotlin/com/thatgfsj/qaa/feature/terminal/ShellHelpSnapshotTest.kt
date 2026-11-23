@@ -66,12 +66,12 @@ class ShellHelpSnapshotTest {
     help / /help          全部      显示本帮助
     model                 顶层      列出本地模型
     model pull <url>      顶层      下载模型（断点续传）
-    model import          顶层      导入模型（SAF 占位）
+    model import          顶层      导入模型（系统文件选择器）
     chat <模型名|序号>    顶层      进入 CHAT 会话
     agent [模型名|序号]   顶层      进入 AGENT 会话
     start window          顶层      切回正常窗口并重启
     backend [值]          顶层      查看 / 锁定请求后端
-    storage grant         顶层      授权存储（议题 #18）
+    storage grant         顶层      授权外部存储目录（SAF）
     clear                 顶层      清空当前会话区
     /status               全部      查看阶段与运行状态
     /exit                 会话      退出会话回顶层态
