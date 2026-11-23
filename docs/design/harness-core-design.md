@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 文档版本 | v1.0（2026-11-24，作为实现议题 #12–#21 的设计输入） |
-| 上游契约 | docs/ARCHITECTURE.md（单一事实来源；本文第 2/3/9 章与其第 3/5/7 节逐条对齐） |
+| 上游契约 | docs/ARCHITECTURE.md（单一事实来源；对应关系：本文第 1 章↔其第 7 节、第 2/3 章↔其第 3 节、第 9 章↔其第 5 节） |
 | 模块归属 | :core-harness / :core-tools / :core-inference 职责切分沿用 ARCHITECTURE.md 第 2 节 |
 | 配套附录 | docs/design/harness-core-appendix.md（JVM 单测清单 + 扩展样例） |
 
@@ -383,7 +383,7 @@ meta 记录（activeLeafId 为当前活动分支叶子，读端取最后一条�
 | errorCode | string/null | 否 | 仅 FAILURE 附带 |
 | tags | array | 否 | 标记，如 /steer 注入的 user 节点带 "steer" |
 | timestamp | long | 是 | epoch 毫秒 |
-| metrics | object | 否 | assistant：backend（实际命中 NPU/HYBRID/CPU）/ttftMs/tokensPerSec/promptTokens/completionTokens/stepIndex/parseRetries/durationMs；tool：durationMs/stepIndex |
+| metrics | object | 否 | assistant：backend（实际命中，ActiveBackend：NPU/HYBRID/GPU/CPU）/ttftMs/tokensPerSec/promptTokens/completionTokens/stepIndex/parseRetries/durationMs；tool：durationMs/stepIndex |
 | compaction | object/null | 否 | 仅 role=summary：被压缩范围引用（见 6.4） |
 
 ### 5.4 /tree 与 /fork 语义

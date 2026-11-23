@@ -44,7 +44,9 @@ graph TD
 ## 3. 核心契约接口（保持同等解耦粒度）
 
 ```kotlin
-enum class ComputeBackend { AUTO, NPU, HYBRID, CPU }
+enum class ComputeBackend { AUTO, NPU, HYBRID, CPU }   // 请求/命令面：backend [auto|npu|hybrid|cpu]
+
+enum class ActiveBackend { NPU, HYBRID, GPU, CPU }      // 实际命中后端（含链内 GPU 附加档；状态栏回显与 metrics.backend 以此为准）
 
 data class AgentConfig(
     val yoloMode: Boolean = false,          // 手机端默认关闭，预留扩展接口
@@ -79,7 +81,7 @@ GenieX SDK 无内建自动降级链与实际后端查询 API（事实依据：do
 | （链内附加档，不暴露命令） | `"gpu"` | Adreno OpenCL；仅 HYBRID 失败后尝试 |
 | CPU | `"cpu"` | 纯 CPU（ngl=0） |
 
-> 语义修正：HYBRID 指官方 HTP+CPU 混合快速路径（早期注释"Adreno GPU"作废）；Adreno 保留为降级链内附加尝试档。`backend [auto|npu|hybrid|cpu]` 命令集保持不变。
+> 语义修正：HYBRID 指官方 HTP+CPU 混合快速路径（早期注释"Adreno GPU"作废）；Adreno 保留为降级链内附加尝试档。请求面 `backend [auto|npu|hybrid|cpu]` 命令集保持不变；命中面以 ActiveBackend（NPU/HYBRID/GPU/CPU）回显，GPU 命中如实展示。
 
 ### 4.2 实际命中后端感知与工程约束
 

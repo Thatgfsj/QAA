@@ -26,7 +26,7 @@
 | L5 | Deny 路径 | tool 节点 DENIED；拒绝话术回注；步数照常累计 |
 | L6 | /steer 工具步打断 | 当前工具完成即停；steer 文本成为新 user 节点（tags=steer） |
 | L7 | 确认挂起中 /steer | 等价 Deny + 转向注入 |
-| L8 | 解析降级 | 连续 2 次脏 JSON 后注入降级提示并禁用工具；轮次终止 |
+| L8 | 解析降级 | 重试 2 次仍失败（累计 3 次解析失败）后注入降级提示并禁用工具；轮次终止 |
 | L9 | 终止不变量 | 对任意恶意脚本（循环调用、恒脏 JSON），runTurn 在 watchdog 超时内必返回 |
 
 ## A.2 AgentConfig
@@ -87,7 +87,7 @@
 | --- | --- | --- |
 | C1 | 阈值下不触发 | ratio<0.8 时安全点检查无副作用 |
 | C2 | 阈值上自动触发 | ratio≥0.8 于工具步边界/轮末触发一次 |
-| C3 | 保护窗口 | 当前轮全保留 + 上轮 user/assistant 文本 + 最新工具输出完整 |
+| C3 | 保护窗口 | 当前轮全保留 + 上轮 user/assistant 文本 + 最新工具输出 + 既有 summary 节点 |
 | C4 | 范围引用 | summary.compaction 的 coveredFrom/coveredTo 沿 parentId 回溯语义正确 |
 | C5 | 组装跳过 | 被压缩链段节点不出现在 prompt；summary 出现且时序正确 |
 | C6 | /compact 手动 | 空闲立即；运行中排队至最近安全点 |
@@ -119,7 +119,7 @@
 
 | # | 用例 | 断言要点 |
 | --- | --- | --- |
-| M1 | 合法全链 | LLM_LOADED→…→LLM_LOADED 七次迁移依序提交，各校验点按脚本通过 |
+| M1 | 合法全链 | LLM_LOADED→…→LLM_LOADED 六次迁移依序提交（第 7 条为终止边，另行单测）；各校验点按脚本通过 |
 | M2 | 非法迁移拒绝 | 枚举全部非法边：状态不变 + IllegalTransitionException + E_MEMORY_MUTEX |
 | M3 | 幂等重入 | 目标态==当前态直接成功 |
 | M4 | 回收校验失败 | FakeMemoryProbe 报低水位 → 停留 LLM_UNLOADING 重试；耗尽走图外恢复路径 |

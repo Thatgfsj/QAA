@@ -9,7 +9,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 端侧推理底座 | Qualcomm GenieX Android SDK（Maven Central），llama_cpp（GGUF）路径，Q4_0 优先 |
-| 后端降级链 | Hexagon NPU → Hybrid（Adreno GPU）→ CPU，自动回退并在状态栏回显实际命中后端 |
+| 后端降级链 | Hexagon NPU → HYBRID（HTP+CPU）→ GPU（Adreno 附加档）→ CPU，自动回退并在状态栏回显实际命中后端 |
 | Pi-Style Harness | 纯 Kotlin 极简 Agent Loop，最小工具原语 `read / write / edit / draw_image`，与 UI 彻底解耦 |
 | 双前端 | Normal 正常窗口 / Terminal 极客终端三段式布局，持久化 `ui_mode` 路由，切换即重启生效 |
 | 树状会话 | JSONL 树形节点存储，`/tree` `/fork` 任意节点分叉，可直接导出为 LoRA 微调轨迹 |

@@ -159,7 +159,7 @@ hybrid→ device_id 置空 + ngl=-1：llama.cpp 逐张量 HTP+CPU 调度（官�
 2. **logcat 观测**：tag `GenieXSdk` 的 `[JNI] [extract] compute_unit = ...`、`resolve_device: <warning>`、create/destroy 调试日志；实现位于 llm_bridge_jni.cpp / jniutils.cpp，版本升级可能变动格式（列 §13 待验证）。降级场景中 `resolve_device` 失败会打 `geniex_resolve_device failed (rc=%d), falling back to empty device`——empty device + ngl=-1 即落到 llama.cpp 自身调度（逐张量 NPU/CPU 混合）。
 3. **性能侧写**：`ProfilingData.prefillSpeed / decodingSpeed`（§6）——NPU/GPU/CPU 的 tok/s 差一个数量级，可作运行期推断与展示（QAA 状态栏可同时展示锁定值 + 实测速度）。
 
-### 3.5 对 QAA 降级链（NPU→Hybrid→CPU）的映射结论
+### 3.5 对 QAA 降级链（NPU→HYBRID→GPU 附加→CPU）的映射结论
 
 - GenieX **没有文档化的"失败自动逐级回退"链**：`qairt` 的 cpu/gpu 请求会被强转 npu；`llama_cpp` 的"回退"本质是 ①加载期按精度选落点（§3.3），②hybrid 模式下逐张量把不支持的算子留在 CPU。
 - 因此 QAA 的 `BackendFallbackManager` 需要**自实现 create 级降级链**：按 §12 建议顺序尝试 `create`，`Result.failure` 即换下一档。
@@ -421,7 +421,7 @@ GenieXSdk.getInstance().setQairtRuntimePath(path)  // 必须在 init 之前调�
 
 | QAA（ARCHITECTURE.md） | GenieX 建议 | 依据/风险 |
 | --- | --- | --- |
-| `AUTO` | `null`（=npu/HTP0）**或显式 `"hybrid"`（NPU+CPU 逐张量，官方称 LLM 快速路径）** | §3.1；hybrid 需显式传值，null 默认是 npu 不是 hybrid |
+| `AUTO` | 首档显式 `"npu"`，失败按链再 `"hybrid"` → `"gpu"` → `"cpu"`（不用 null：0.10.0 null 默认值未验证，见 §13 待验证 ③） | §3.1/4.1；与 ARCHITECTURE 4.1 一致 |
 | `NPU` | `"npu"`（HTP0 固定） | §3.1 |
 | `HYBRID` | `"hybrid"`——**已定夺（2026-11-24）**：映射 GenieX hybrid（HTP+CPU 官方快速路径），架构注释同步修正；Adreno `"gpu"` 仅作降级链内附加尝试档 | §3.5 |
 | `CPU` | `"cpu"`（ngl 强制 0） | §3.1 |
