@@ -30,7 +30,8 @@
 ### 双前端（:app + :feature-*）
 - Normal 窗口（会话/模型管理/设置）与 Terminal 极客终端（三段式布局 + 实时统计栏）
 - ui_mode 持久化路由，切换即重启生效（设置页 / start window）
-- Terminal 全中文命令集：help / model / chat / agent / backend / clear / start window / /exit / /status / /tree / /fork / /compact / /steer / /skills
+- Terminal 全中文命令集：help / model / chat / agent / backend / clear / start window / /exit / /status / /tree / /fork / /compact / /steer / /skills / /new
+- backend 锁定即时生效（已加载时自动卸载重载，失败回滚旧后端）；/new 新建会话（自增 id、旧会话文件保留）
 
 ### 质量基线
 - 全仓 700+ JVM 单测零失败；六大模块依赖边界经独立评审与代码索引复查
