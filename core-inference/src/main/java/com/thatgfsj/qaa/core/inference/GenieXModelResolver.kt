@@ -13,6 +13,9 @@ interface GenieXModelGateway {
 
     suspend fun getPaths(modelName: String): ModelPaths?
 
+    /** 列出已托管模型名（docs/research/geniex-api.md §8.3；0.10.0 wrapper 无 listDetailed/query）。 */
+    suspend fun list(): List<String>
+
     fun pull(input: ModelPullInput): Flow<ModelManagerWrapper.PullEvent>
 }
 
@@ -21,6 +24,8 @@ object DefaultGenieXModelGateway : GenieXModelGateway {
 
     override suspend fun getPaths(modelName: String): ModelPaths? =
         ModelManagerWrapper.getPaths(modelName)
+
+    override suspend fun list(): List<String> = ModelManagerWrapper.list()
 
     override fun pull(input: ModelPullInput): Flow<ModelManagerWrapper.PullEvent> =
         ModelManagerWrapper.pullFlow(input)
