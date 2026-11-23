@@ -24,11 +24,13 @@ graph TD
     APP --> TUI[:feature-terminal-ui]
     NUI --> HAR[:core-harness]
     TUI --> HAR
-    HAR --> INF[:core-inference]
-    HAR --> TOOL[:core-tools]
+    HAR -. 逻辑契约 HarnessPorts .-> INF[:core-inference]
+    HAR -. 逻辑契约 HarnessPorts .-> TOOL[:core-tools]
     TOOL --> INF
     INF --> GENIEX[GenieX SDK 0.10.0]
 ```
+
+> 依赖注记：:core-harness 为纯 JVM 库，图中 HAR→INF / HAR→TOOL 为**逻辑契约**关系（虚线）——端口接口定义在 :core-harness（HarnessPorts.kt），由 :app 在装配层注入 Android 侧实现（依赖倒置）；:app 同时承担 harness 与 inference/tools 的运行时装配。
 
 | 模块 | 职责 | 禁止 |
 | --- | --- | --- |
