@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import com.thatgfsj.qaa.data.UiModeStore
 import com.thatgfsj.qaa.data.dataStoreUiModeStore
 import com.thatgfsj.qaa.feature.normal.NormalApp
+import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
 import com.thatgfsj.qaa.feature.normal.status.FakeInferenceStatusSource
 import kotlinx.coroutines.launch
 
@@ -30,6 +31,8 @@ class MainActivity : ComponentActivity() {
                 StartRoute.Normal -> NormalApp(
                     statusSource = remember { FakeInferenceStatusSource() },
                     onSwitchToTerminal = ::switchToTerminal,
+                    // 确认门在此装配（AgentLoop 装配点，真实 Loop 归冒烟验收议题 #11）。
+                    confirmGate = remember { NormalGate() },
                 )
                 StartRoute.Terminal -> TerminalHost(onStartNormalWindow = ::switchToNormalWindow)
                 null -> LoadingPlaceholder()

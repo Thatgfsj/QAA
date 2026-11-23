@@ -12,10 +12,12 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -23,6 +25,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.thatgfsj.qaa.feature.normal.chat.ChatScreen
+import com.thatgfsj.qaa.feature.normal.chat.ChatViewModel
+import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
+import com.thatgfsj.qaa.feature.normal.confirm.NormalToolConfirmDialog
 import com.thatgfsj.qaa.feature.normal.models.ModelManageScreen
 import com.thatgfsj.qaa.feature.normal.settings.SettingsScreen
 import com.thatgfsj.qaa.feature.normal.status.BackendStatusBar
@@ -42,16 +47,32 @@ object NormalRoutes {
  * 接线预留：:app 的 ui_mode 启动路由集成属 Issue #10；
  * [onSwitchToTerminal] 仅回调占位，ui_mode 写入与立即重启严禁在本次实现（Issue #7）；
  * [statusSource] 为 Issue #5 真实降级链数据源接入点。
+ * [confirmGate] 为工具确认门（Issue #14）：本层装配中文确认对话框，AgentLoop 由 :app
+ * 注入同一实例后即可在工具执行前挂起；[chatViewModel] 由本层持有并下发给会话页，
+ * 避免 NavHost 目标页重复创建实例导致确认状态与确认门脱钩。
  */
 @Composable
 fun NormalApp(
     statusSource: InferenceStatusSource = remember { FakeInferenceStatusSource() },
     onSwitchToTerminal: () -> Unit = {},
+    chatViewModel: ChatViewModel = viewModel(),
+    confirmGate: NormalGate = remember { NormalGate() },
 ) {
     val navController = rememberNavController()
     val status by statusSource.status.collectAsStateWithLifecycle()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val pendingConfirm by confirmGate.pending.collectAsStateWithLifecycle()
+
+    // 确认门挂起状态镜像到会话页（决策仍归 NormalGate）；对话框挂在本层，切页不丢。
+    LaunchedEffect(confirmGate, chatViewModel) {
+        confirmGate.pending.collect { chatViewModel.setToolConfirmPending(it?.description) }
+    }
+    NormalToolConfirmDialog(
+        pending = pendingConfirm,
+        onAllow = confirmGate::allow,
+        onDeny = confirmGate::deny,
+    )
 
     Scaffold(
         topBar = { BackendStatusBar(status) },
@@ -83,7 +104,7 @@ fun NormalApp(
             startDestination = NormalRoutes.CHAT,
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
-            composable(NormalRoutes.CHAT) { ChatScreen() }
+            composable(NormalRoutes.CHAT) { ChatScreen(viewModel = chatViewModel) }
             composable(NormalRoutes.MODELS) { ModelManageScreen() }
             composable(NormalRoutes.SETTINGS) {
                 SettingsScreen(onSwitchToTerminal = onSwitchToTerminal)

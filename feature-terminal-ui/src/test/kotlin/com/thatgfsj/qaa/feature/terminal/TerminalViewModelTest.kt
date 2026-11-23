@@ -128,6 +128,19 @@ class TerminalViewModelTest {
         assertTrue(pending.requestId > 1L)
     }
 
+    @Test
+    fun dismissToolConfirmationClearsPendingOnly() {
+        val vm = TerminalViewModel()
+        vm.requestToolConfirmation("write 路径=\"a.txt\"")
+        vm.dismissToolConfirmation()
+        assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+        // 已决策结果不因取消清理被抹掉。
+        vm.requestToolConfirmation("edit 路径=\"b.kt\"")
+        vm.onToolAllow()
+        vm.dismissToolConfirmation()
+        assertTrue(vm.uiState.value.toolConfirm is ToolConfirmState.Resolved)
+    }
+
     // ---- reset（清屏再渲染能力，Issue #10 接线） ----
 
     @Test

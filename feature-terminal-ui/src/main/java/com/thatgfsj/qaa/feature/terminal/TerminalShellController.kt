@@ -73,7 +73,12 @@ class TerminalShellController(
     }
 
     companion object {
-        /** 会话态 prompt 的一次性提示：推理引擎接线属于冒烟验收议题。 */
-        const val PROMPT_NOTICE = "（推理引擎接线随冒烟验收议题 #11 落地，本期暂不返回模型输出）"
+        /**
+         * 会话态 prompt 的一次性提示：推理引擎接线属于冒烟验收议题；
+         * 「确认演示」为人工验收入口（真实工具调用由 AgentLoop 触发）。
+         */
+        const val PROMPT_NOTICE =
+            "（推理引擎接线随冒烟验收议题 #11 落地，本期暂不返回模型输出；" +
+                "输入「确认演示」可预览工具确认流）"
     }
 }

@@ -44,6 +44,7 @@ import com.thatgfsj.qaa.feature.normal.model.ChatRole
 fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+    val toolConfirmPending by viewModel.toolConfirmPending.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -61,6 +62,17 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
         ) {
             items(messages, key = { it.id }) { message ->
                 MessageBubble(message)
+            }
+        }
+        // 等待确认提示：与 NormalGate 的挂起状态同步（对话框在 NormalApp 顶层）。
+        toolConfirmPending?.let { description ->
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                Text(
+                    text = "等待确认：$description",
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
         Row(

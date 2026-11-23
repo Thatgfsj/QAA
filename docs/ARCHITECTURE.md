@@ -22,7 +22,8 @@
 graph TD
     APP[:app 入口与路由] --> NUI[:feature-normal-ui]
     APP --> TUI[:feature-terminal-ui]
-    NUI --> HAR[:core-harness]
+    APP --> HAR[:core-harness]
+    NUI --> HAR
     TUI --> HAR
     HAR -. 逻辑契约 HarnessPorts .-> INF[:core-inference]
     HAR -. 逻辑契约 HarnessPorts .-> TOOL[:core-tools]
