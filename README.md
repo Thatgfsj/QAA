@@ -49,6 +49,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - Normal 模式：设置页 → "切换至极客终端模式" → App 立即重启进入终端。
 - Terminal 模式：输入 `start window` → 立即重启回正常窗口；`help` 查看全中文命令说明。
 
+## 更新日志
+
+版本级变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 工程规范
 
 - 一切云端修改走 Issue → 分支 → PR；单文件 ≤1000 行；单 PR 尽量 ≤1000 行。
