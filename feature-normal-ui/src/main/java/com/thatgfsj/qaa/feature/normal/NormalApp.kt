@@ -26,6 +26,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.thatgfsj.qaa.feature.normal.chat.ChatScreen
 import com.thatgfsj.qaa.feature.normal.chat.ChatViewModel
+import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
 import com.thatgfsj.qaa.feature.normal.confirm.NormalToolConfirmDialog
 import com.thatgfsj.qaa.feature.normal.models.ModelManageScreen
@@ -57,6 +58,7 @@ fun NormalApp(
     onSwitchToTerminal: () -> Unit = {},
     chatViewModel: ChatViewModel = viewModel(),
     confirmGate: NormalGate = remember { NormalGate() },
+    agentPort: NormalAgentPort? = null,
 ) {
     val navController = rememberNavController()
     val status by statusSource.status.collectAsStateWithLifecycle()
@@ -67,6 +69,10 @@ fun NormalApp(
     // 确认门挂起状态镜像到会话页（决策仍归 NormalGate）；对话框挂在本层，切页不丢。
     LaunchedEffect(confirmGate, chatViewModel) {
         confirmGate.pending.collect { chatViewModel.setToolConfirmPending(it?.description) }
+    }
+    // Agent 运行链注入（:app 装配层）：null 时会话页保持骨架 fake 回复。
+    LaunchedEffect(agentPort, chatViewModel) {
+        chatViewModel.bindAgent(agentPort)
     }
     NormalToolConfirmDialog(
         pending = pendingConfirm,
