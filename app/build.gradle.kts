@@ -48,8 +48,11 @@ dependencies {
     // 双前端模块（占位依赖，启动路由属 Issue #10）
     implementation(project(":feature-normal-ui"))
     implementation(project(":feature-terminal-ui"))
-    // harness 端口契约：确认门接口与后续 AgentLoop 装配（实现由 :app 注入）
+    // harness 端口契约：确认门接口与 AgentLoop 装配（实现由 :app 注入）
     implementation(project(":core-harness"))
+    // 装配层端口实现：推理引擎 / 模型管理（Issue #19）与四原语工具执行体。
+    implementation(project(":core-inference"))
+    implementation(project(":core-tools"))
 
     // 契约：GenieX Android SDK 0.10.0（Maven Central，附带 arm64-v8a 原生库，Issue #4）
     implementation(libs.geniex.android)
