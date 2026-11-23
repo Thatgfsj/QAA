@@ -83,6 +83,27 @@ sealed interface ShellEffect {
 
     /** start window：切回正常窗口并立即重启。 */
     data object StartNormalWindow : ShellEffect
+
+    /** model pull <url>：交给拉取端口执行，进度与结果回显到对话区。 */
+    data class PullModel(val url: String) : ShellEffect
+
+    /** /tree：向 Agent 端口取会话树快照。 */
+    data object QueryTree : ShellEffect
+
+    /** /fork [节点ID]：以指定节点（缺省活动叶）开新分支。 */
+    data class ForkNode(val nodeId: String?) : ShellEffect
+
+    /** /compact：手动压缩上下文。 */
+    data object CompactContext : ShellEffect
+
+    /** /skills：查询技能注册表状态。 */
+    data object QuerySkills : ShellEffect
+
+    /** /status 追加运行态明细（模型清单数、会话树规模、待处理输入）。 */
+    data object QueryStatusExtra : ShellEffect
+
+    /** /steer <指令>：提交运行中干预。 */
+    data class SteerInstruction(val text: String) : ShellEffect
 }
 
 /** 单次解析结果：[stage] 为解析后的阶段，[output] 为中文回显行，[effects] 按列表顺序执行。 */

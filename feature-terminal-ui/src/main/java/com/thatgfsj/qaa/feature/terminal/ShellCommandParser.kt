@@ -34,7 +34,7 @@ object ShellCommandParser {
             "backend" -> parseBackend(tokens, context)
             "storage" -> parseStorage(tokens, context)
             "clear" -> parseClear(tokens, context)
-            "/status" -> reply(context, shellStatusText(context))
+            "/status" -> statusResult(context)
             "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
             else -> unknownShellCommand(tokens.first(), context)
         }
@@ -50,16 +50,23 @@ object ShellCommandParser {
                     context,
                     "下载地址无效：${tokens[2]}。请提供以 http:// 或 https:// 开头的地址。",
                 )
-                else -> reply(
-                    context,
-                    "已解析模型下载地址：${tokens[2]}",
-                    "模型下载（断点续传）执行体随议题 #19 落地，本期仅回显解析结果。",
+                else -> ShellParseResult(
+                    stage = context.stage,
+                    output = listOf(
+                        "开始下载模型：${tokens[2]}",
+                        "下载支持断点续传，进度实时回显；完成后模型会登记进本地清单。",
+                    ),
+                    effects = listOf(ShellEffect.PullModel(tokens[2])),
                 )
             }
             "import" -> if (tokens.size > 2) {
                 usage(context, "model import", "model import 不接受参数，导入文件由系统文件选择器（SAF）提供。")
             } else {
-                reply(context, "模型导入（SAF 旁加载）：该命令执行体随对应议题落地（#19）。")
+                reply(
+                    context,
+                    "模型导入（SAF 旁加载）：请在系统文件选择器中选取 GGUF 文件。",
+                    "本入口暂为占位：文件选择器接线待落地，模型目录为 App 私有目录 filesDir/models。",
+                )
             }
             else -> error(
                 context,
@@ -192,13 +199,13 @@ object ShellCommandParser {
         }
         return when (head.lowercase()) {
             "/help" -> reply(context, shellHelpText())
-            "/status" -> reply(context, shellStatusText(context))
+            "/status" -> statusResult(context)
             "/exit" -> exitSession(tokens, context)
-            "/tree" -> stubCommand(tokens, context, "/tree", "会话树", "#15")
+            "/tree" -> singleEffect(tokens, context, "/tree", ShellEffect.QueryTree)
             "/fork" -> fork(tokens, context)
-            "/compact" -> stubCommand(tokens, context, "/compact", "上下文压缩", "#16")
+            "/compact" -> singleEffect(tokens, context, "/compact", ShellEffect.CompactContext)
             "/steer" -> steer(tokens, line, context)
-            "/skills" -> stubCommand(tokens, context, "/skills", "技能列表（SkillRegistry）", "#47")
+            "/skills" -> singleEffect(tokens, context, "/skills", ShellEffect.QuerySkills)
             else -> error(
                 context,
                 "未知会话命令：$head。可用命令：/exit、/tree、/fork、/compact、/steer、/skills；" +
@@ -206,6 +213,13 @@ object ShellCommandParser {
             )
         }
     }
+
+    /** /status：先回显快照态，再向 Agent 端口追加运行态明细（模型清单、会话树、队列）。 */
+    private fun statusResult(context: ShellContext): ShellParseResult = ShellParseResult(
+        stage = context.stage,
+        output = listOf(shellStatusText(context)),
+        effects = listOf(ShellEffect.QueryStatusExtra),
+    )
 
     private fun exitSession(tokens: List<String>, context: ShellContext): ShellParseResult {
         if (tokens.size > 1) return usage(context, "/exit", "/exit 不接受参数。")
@@ -217,26 +231,31 @@ object ShellCommandParser {
 
     private fun fork(tokens: List<String>, context: ShellContext): ShellParseResult {
         if (tokens.size > 2) return usage(context, "/fork [节点ID]", "/fork 最多接受一个节点 ID。")
-        val node = tokens.getOrNull(1)
-        val label = if (node.isNullOrBlank()) "从当前节点分叉" else "从节点 $node 分叉"
-        return reply(context, "$label：该命令执行体随对应议题落地（#15）。")
+        return ShellParseResult(
+            stage = context.stage,
+            effects = listOf(ShellEffect.ForkNode(tokens.getOrNull(1))),
+        )
     }
 
     private fun steer(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {
         if (tokens.size < 2) return usage(context, "/steer <指令>", "/steer 需要附带干预指令。")
         val instruction = line.substringAfter(tokens.first()).trim()
-        return reply(context, "已记录干预指令：$instruction。该命令执行体随对应议题落地（#17）。")
+        return ShellParseResult(
+            stage = context.stage,
+            output = listOf("已提交干预指令：$instruction（运行中在当前工具步结束后生效）。"),
+            effects = listOf(ShellEffect.SteerInstruction(instruction)),
+        )
     }
 
-    private fun stubCommand(
+    /** 无参数查询类命令：参数多于命令本身即报用法，否则只产出执行体副作用。 */
+    private fun singleEffect(
         tokens: List<String>,
         context: ShellContext,
         command: String,
-        label: String,
-        issue: String,
+        effect: ShellEffect,
     ): ShellParseResult {
-        if (tokens.size > 1) return usage(context, command, "$command 暂不接受参数。")
-        return reply(context, "$label：该命令执行体随对应议题落地（$issue）。")
+        if (tokens.size > 1) return usage(context, command, "$command 不接受参数。")
+        return ShellParseResult(stage = context.stage, effects = listOf(effect))
     }
 
     // ---- 公共辅助 ----

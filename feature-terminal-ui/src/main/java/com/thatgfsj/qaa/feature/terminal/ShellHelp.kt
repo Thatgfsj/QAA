@@ -18,8 +18,8 @@ private data class HelpRow(val command: String, val scope: String, val descripti
 private val HELP_ROWS = listOf(
     HelpRow("help / /help", "全部", "显示本帮助"),
     HelpRow("model", "顶层", "列出本地模型"),
-    HelpRow("model pull <url>", "顶层", "下载模型（议题 #19）"),
-    HelpRow("model import", "顶层", "导入模型（议题 #19）"),
+    HelpRow("model pull <url>", "顶层", "下载模型（断点续传）"),
+    HelpRow("model import", "顶层", "导入模型（SAF 占位）"),
     HelpRow("chat <模型名|序号>", "顶层", "进入 CHAT 会话"),
     HelpRow("agent [模型名|序号]", "顶层", "进入 AGENT 会话"),
     HelpRow("start window", "顶层", "切回正常窗口并重启"),
@@ -28,11 +28,11 @@ private val HELP_ROWS = listOf(
     HelpRow("clear", "顶层", "清空当前会话区"),
     HelpRow("/status", "全部", "查看阶段与运行状态"),
     HelpRow("/exit", "会话", "退出会话回顶层态"),
-    HelpRow("/tree", "会话", "查看会话树（议题 #15）"),
-    HelpRow("/fork [节点ID]", "会话", "分叉节点（议题 #15）"),
-    HelpRow("/compact", "会话", "压缩上下文（议题 #16）"),
-    HelpRow("/steer <指令>", "会话", "运行中干预（议题 #17）"),
-    HelpRow("/skills", "会话", "查看技能（议题 #47）"),
+    HelpRow("/tree", "会话", "查看会话树"),
+    HelpRow("/fork [节点ID]", "会话", "以节点为分叉点"),
+    HelpRow("/compact", "会话", "压缩上下文"),
+    HelpRow("/steer <指令>", "会话", "运行中干预"),
+    HelpRow("/skills", "会话", "查看可用技能"),
 )
 
 /** 全中文命令表（命令、适用状态、说明三列）与输入约定提示。 */
@@ -47,14 +47,14 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。")
     appendLine("· chat / agent 支持模型名或从 1 起的序号；输入 model 查看本地模型清单。")
     appendLine("· backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。")
-    append("· 标注议题号的命令当前为占位提示，执行体随对应议题落地。")
+    append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
 
 /** 本地模型清单：序号从 1 起，供 chat / agent 选型。 */
 internal fun localModelListText(models: List<LocalModelEntry>, current: TerminalModelInfo): String =
     buildString {
         if (models.isEmpty()) {
-            append("本地暂无模型，可执行 model pull <url> 下载（执行体随议题 #19 落地）。")
+            append("本地暂无模型，可执行 model pull <url> 下载，或用 model import 旁加载。")
         } else {
             appendLine("本地模型清单：")
             models.forEach { appendLine("  ${it.index}. ${it.displayText}") }

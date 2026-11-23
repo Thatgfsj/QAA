@@ -72,11 +72,12 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun modelPullEchoesUrlAndIssueStub() {
-        val result = parse("model pull https://example.com/supra.gguf")
-        assertTrue(result.effects.isEmpty())
-        assertTrue(result.text().contains("https://example.com/supra.gguf"))
-        assertTrue(result.text().contains("#19"))
+    fun modelPullEmitsPullEffectAndHintsResume() {
+        val url = "https://example.com/supra.gguf"
+        val result = parse("model pull $url")
+        assertEquals(listOf(ShellEffect.PullModel(url)), result.effects)
+        assertTrue(result.text().contains(url))
+        assertTrue(result.text().contains("断点续传"))
     }
 
     @Test
@@ -99,10 +100,10 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun modelImportIsStubbedWithIssue19() {
+    fun modelImportKeepsSafePlaceholder() {
         val text = parse("model import").text()
         assertTrue(text.contains("SAF"))
-        assertTrue(text.contains("（#19）"))
+        assertTrue(text.contains("占位"))
     }
 
     @Test
@@ -343,29 +344,28 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun treeIsStubbedWithIssue15() {
-        val text = parse("/tree", session).text()
-        assertTrue(text.contains("会话树"))
-        assertTrue(text.contains("（#15）"))
+    fun treeEmitsQueryEffect() {
+        val result = parse("/tree", session)
+        assertEquals(listOf(ShellEffect.QueryTree), result.effects)
+        assertTrue(result.output.isEmpty())
     }
 
     @Test
     fun treeRejectsArguments() {
-        assertTrue(parse("/tree 1", session).text().contains("暂不接受参数"))
+        assertTrue(parse("/tree 1", session).text().contains("不接受参数"))
     }
 
     @Test
-    fun forkWithoutNodeIsStubbedFromCurrentNode() {
-        val text = parse("/fork", session).text()
-        assertTrue(text.contains("从当前节点分叉"))
-        assertTrue(text.contains("（#15）"))
+    fun forkWithoutNodeTargetsActiveLeaf() {
+        val result = parse("/fork", session)
+        assertEquals(listOf(ShellEffect.ForkNode(null)), result.effects)
+        assertTrue(result.output.isEmpty())
     }
 
     @Test
-    fun forkWithNodeEchoesNodeId() {
-        val text = parse("/fork node-42", session).text()
-        assertTrue(text.contains("从节点 node-42 分叉"))
-        assertTrue(text.contains("（#15）"))
+    fun forkWithNodeCarriesNodeId() {
+        val result = parse("/fork node-42", session)
+        assertEquals(listOf(ShellEffect.ForkNode("node-42")), result.effects)
     }
 
     @Test
@@ -374,10 +374,10 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun compactIsStubbedWithIssue16() {
-        val text = parse("/compact", session).text()
-        assertTrue(text.contains("上下文压缩"))
-        assertTrue(text.contains("（#16）"))
+    fun compactEmitsCompactEffect() {
+        val result = parse("/compact", session)
+        assertEquals(listOf(ShellEffect.CompactContext), result.effects)
+        assertTrue(result.output.isEmpty())
     }
 
     @Test
@@ -386,17 +386,25 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun steerEchoesInstructionWithIssue17() {
-        val text = parse("/steer 改成中文回答", session).text()
-        assertTrue(text.contains("改成中文回答"))
-        assertTrue(text.contains("（#17）"))
+    fun steerEmitsInstructionEffect() {
+        val result = parse("/steer 改成中文回答", session)
+        assertEquals(listOf(ShellEffect.SteerInstruction("改成中文回答")), result.effects)
+        assertTrue(result.text().contains("改成中文回答"))
+        assertTrue(result.text().contains("工具步结束"))
     }
 
     @Test
-    fun skillsIsStubbedWithSkillRegistryIssue() {
-        val text = parse("/skills", session).text()
-        assertTrue(text.contains("SkillRegistry"))
-        assertTrue(text.contains("（#47）"))
+    fun skillsEmitsQueryEffect() {
+        val result = parse("/skills", session)
+        assertEquals(listOf(ShellEffect.QuerySkills), result.effects)
+        assertTrue(result.output.isEmpty())
+    }
+
+    @Test
+    fun statusKeepsSnapshotTextAndEmitsExtraQuery() {
+        val result = parse("/status", session)
+        assertEquals(listOf(ShellEffect.QueryStatusExtra), result.effects)
+        assertTrue(result.text().contains("请求后端：auto"))
     }
 
     @Test

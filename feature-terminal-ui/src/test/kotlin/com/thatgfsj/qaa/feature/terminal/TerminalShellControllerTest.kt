@@ -1,9 +1,13 @@
 package com.thatgfsj.qaa.feature.terminal
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -35,7 +39,19 @@ class TerminalShellControllerTest {
         viewModel: TerminalViewModel = TerminalViewModel(),
         onPrompt: (String, TerminalMode) -> Unit = { _, _ -> },
         onStartNormalWindow: () -> Unit = {},
-    ): TerminalShellController = TerminalShellController(viewModel, onPrompt, onStartNormalWindow)
+        agent: TerminalAgentPort? = null,
+        modelList: TerminalModelListPort? = null,
+        modelPull: TerminalModelPullPort? = null,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    ): TerminalShellController = TerminalShellController(
+        viewModel = viewModel,
+        onPrompt = onPrompt,
+        onStartNormalWindow = onStartNormalWindow,
+        agent = agent,
+        modelList = modelList,
+        modelPull = modelPull,
+        scope = scope,
+    )
 
     @Test
     fun helpCommandEchoesInputAndAppendsChineseTable() {
@@ -90,7 +106,7 @@ class TerminalShellControllerTest {
         shell.onInput("chat 1")
         shell.onInput("第一句")
         shell.onInput("第二句")
-        val notices = viewModel.uiState.value.entries.count { it.text == TerminalShellController.PROMPT_NOTICE }
+        val notices = viewModel.uiState.value.entries.count { it.text == TerminalShellController.UNWIRED_NOTICE }
         assertEquals(1, notices)
     }
 
@@ -181,5 +197,141 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         controller(viewModel).onInput("   ")
         assertTrue(viewModel.uiState.value.entries.isEmpty())
+    }
+
+    // ---- Issue #19 执行体接线 ----
+
+    @Test
+    fun promptStartsRealTurnWhenIdle() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("帮我读一下 README")
+        advanceUntilIdle()
+        assertEquals(listOf("帮我读一下 README"), port.turns)
+    }
+
+    @Test
+    fun promptWhileRunningBecomesFollowUp() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort(initial = TerminalAgentState.RUNNING)
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("补充一句")
+        advanceUntilIdle()
+        assertEquals(listOf("补充一句"), port.followUps)
+        assertTrue(port.turns.isEmpty())
+        assertTrue(viewModel.uiState.value.entries.any { it.text.contains("Follow-up") })
+    }
+
+    @Test
+    fun treeCommandPrintsSessionTreeFromPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("/tree")
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.treeText })
+    }
+
+    @Test
+    fun compactSkillsAndStatusRouteToAgentPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("/compact")
+        shell.onInput("/skills")
+        shell.onInput("/status")
+        advanceUntilIdle()
+        val texts = viewModel.uiState.value.entries.map { it.text }
+        assertTrue(texts.any { it == port.compactText })
+        assertTrue(texts.any { it == port.skillsText })
+        assertTrue(texts.any { it == port.statusText })
+    }
+
+    @Test
+    fun forkCommandCarriesNodeIdToPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("/fork n-000042")
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.entries.any { it.text.contains("n-000042") })
+    }
+
+    @Test
+    fun steerCommandSubmitsInstruction() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort(initial = TerminalAgentState.RUNNING)
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        shell.onInput("/steer 先解释再说")
+        advanceUntilIdle()
+        assertEquals(listOf("先解释再说"), port.steers)
+    }
+
+    @Test
+    fun modelListComesFromInjectedCatalogAndChatResolvesOrdinal() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val models = listOf(
+            LocalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0"),
+            LocalModelEntry(2, "Qwen3-4B", "Q4_K_M"),
+        )
+        val shell = controller(viewModel, agent = port, modelList = FakeTerminalModelList(models), scope = this)
+        advanceUntilIdle()
+        shell.onInput("model")
+        val listText = viewModel.uiState.value.entries.last().text
+        assertTrue(listText.contains("2. Qwen3-4B(Q4_K_M)"))
+        shell.onInput("chat 2")
+        advanceUntilIdle()
+        assertEquals("Qwen3-4B(Q4_K_M)", viewModel.uiState.value.modelInfo.displayText)
+        assertEquals(listOf("Qwen3-4B"), port.selectedModels)
+    }
+
+    @Test
+    fun modelPullEchoesProgressAndCompletion() = runTest {
+        val viewModel = TerminalViewModel()
+        val events = listOf(
+            TerminalPullEvent.Progress(bytes = 0, totalBytes = 100, percent = 0f),
+            TerminalPullEvent.Progress(bytes = 55, totalBytes = 100, percent = 0.55f),
+            TerminalPullEvent.Completed(name = "org/repo", path = "/data/models/repo.gguf"),
+        )
+        val shell = controller(
+            viewModel,
+            modelPull = FakeTerminalModelPull(events),
+            scope = this,
+        )
+        shell.onInput("model pull https://huggingface.co/org/repo")
+        advanceUntilIdle()
+        val texts = viewModel.uiState.value.entries.map { it.text }
+        assertTrue(texts.any { it.contains("0%") })
+        assertTrue(texts.any { it.contains("55%") })
+        assertTrue(texts.any { it.contains("模型下载完成：org/repo") && it.contains("/data/models/repo.gguf") })
+    }
+
+    @Test
+    fun modelImportKeepsPlaceholderWithoutSideEffects() = runTest {
+        val viewModel = TerminalViewModel()
+        val shell = controller(viewModel, scope = this)
+        shell.onInput("model import")
+        advanceUntilIdle()
+        val texts = viewModel.uiState.value.entries.map { it.text }
+        assertTrue(texts.any { it.contains("SAF") })
+        assertTrue(texts.any { it.contains("占位") })
+    }
+
+    @Test
+    fun backendCommandForwardsLockToAgentPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("backend cpu")
+        advanceUntilIdle()
+        assertEquals(listOf(BackendRequest.CPU), port.backends)
     }
 }
