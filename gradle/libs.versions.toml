@@ -8,6 +8,7 @@ coreKtx = "1.15.0"
 coroutines = "1.10.1"
 geniex = "0.10.0"
 junit = "4.13.2"
+junitJupiter = "5.11.4"
 navigationCompose = "2.8.5"
 lifecycle = "2.8.7"
 iconsCore = "1.7.6"
@@ -23,6 +24,7 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 geniex-android = { group = "com.qualcomm.qti", name = "geniex-android", version.ref = "geniex" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
