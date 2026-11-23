@@ -65,9 +65,29 @@ interface ImageGenEngine {
 }
 ```
 
-## 4. 后端降级链
+## 4. 后端降级链（GenieX 事实对照）
 
-初始化顺序固定：**Hexagon NPU → Hybrid（Adreno GPU）→ CPU**。任一层算子不兼容或初始化失败即逐层回退；实际命中后端作为状态流对外暴露，Normal 状态栏与 Terminal 顶部常驻栏均订阅同一数据源。`backend [auto|npu|hybrid|cpu]` 支持手动锁定。
+GenieX SDK 无内建自动降级链与实际后端查询 API（事实依据：docs/research/geniex-api.md）；降级链由 QAA `BackendFallbackManager` 在引擎 create 级别自实现：任一档 `Result.failure` 即尝试下一档，顺序 **NPU → HYBRID → GPU（附加尝试）→ CPU**。
+
+### 4.1 ComputeBackend 与 GenieX compute_unit 映射（2026-11-24 定夺）
+
+| QAA ComputeBackend | GenieX compute_unit | 语义 |
+| --- | --- | --- |
+| AUTO | 依降级链依次显式尝试 | npu → hybrid → gpu → cpu |
+| NPU | `"npu"` | Hexagon HTP0 固定（Q4_0 官方精度表背书） |
+| HYBRID | `"hybrid"` | HTP + CPU 逐张量混合调度（GenieX 官方 LLM 快速路径） |
+| （链内附加档，不暴露命令） | `"gpu"` | Adreno OpenCL；仅 HYBRID 失败后尝试 |
+| CPU | `"cpu"` | 纯 CPU（ngl=0） |
+
+> 语义修正：HYBRID 指官方 HTP+CPU 混合快速路径（早期注释"Adreno GPU"作废）；Adreno 保留为降级链内附加尝试档。`backend [auto|npu|hybrid|cpu]` 命令集保持不变。
+
+### 4.2 实际命中后端感知与工程约束
+
+- 三源合一感知：显式锁定值（应用层记录）+ logcat（tag `GenieXSdk`）+ `ProfilingData` 速度侧写（prefillSpeed / decodingSpeed 数量级差异）
+- `ProfilingData` 直供指标：ttftMs / promptTokens / generatedTokens / prefillSpeed / decodingSpeed / stopReason，`InferenceMetrics` 直接映射
+- 流式取消必须调用 `stopStream()`（仅取消 Flow 不停止 native 生成）
+- release 混淆需应用侧 keep GenieX JNI 方法（AAR 无 consumer proguard 规则）
+- Normal 状态栏与 Terminal 顶部常驻栏订阅同一后端状态流
 
 ## 5. ModelMemoryCoordinator 互斥状态机（硬约束）
 
