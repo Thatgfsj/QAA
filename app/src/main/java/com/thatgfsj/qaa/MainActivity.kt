@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
                     statusSource = remember { FakeInferenceStatusSource() },
                     onSwitchToTerminal = ::switchToTerminal,
                 )
-                StartRoute.Terminal -> TerminalPlaceholderScreen()
+                StartRoute.Terminal -> TerminalHost(onStartNormalWindow = ::switchToNormalWindow)
                 null -> LoadingPlaceholder()
             }
         }
@@ -41,6 +41,14 @@ class MainActivity : ComponentActivity() {
     private fun switchToTerminal() {
         lifecycleScope.launch {
             uiModeStore.setMode(UiMode.TERMINAL)
+            restarter.restart()
+        }
+    }
+
+    /** 终端 `start window` 接线：写 ui_mode = NORMAL → 立即重启回正常窗口。 */
+    private fun switchToNormalWindow() {
+        lifecycleScope.launch {
+            uiModeStore.setMode(UiMode.NORMAL)
             restarter.restart()
         }
     }

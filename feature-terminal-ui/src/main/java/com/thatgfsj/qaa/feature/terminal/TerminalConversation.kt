@@ -114,12 +114,25 @@ private fun LazyListState.isNearBottom(thresholdPx: Float): Boolean {
     return last.offset + last.size <= info.viewportEndOffset + thresholdPx
 }
 
-/** 单行对话：前缀着色（你 / AI），正文浅字等宽。 */
+/** 单行对话：前缀着色（你 / AI），正文浅字等宽；命令输出无前缀、整段浅灰。 */
 @Composable
 private fun TerminalEntryRow(entry: TerminalEntry) {
+    if (entry.role == TerminalRole.SYSTEM) {
+        Text(
+            text = entry.text,
+            color = TerminalColors.TextPrimary.copy(alpha = 0.85f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp),
+        )
+        return
+    }
     val prefixColor = when (entry.role) {
         TerminalRole.USER -> TerminalColors.UserPrefix
         TerminalRole.AI -> TerminalColors.AiPrefix
+        TerminalRole.SYSTEM -> TerminalColors.TextPrimary
     }
     Text(
         text = buildAnnotatedString {
