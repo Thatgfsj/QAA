@@ -172,15 +172,20 @@ class SteerTurnDriver(private val queue: SteerQueue) {
      * 驱动轮次：[initialText] 为 null 表示空闲态直接消费队列（无首轮输入）。
      * 每条 steer 独立成轮：边界转向续跑生成，轮末 steer 以 tags=[steer] 新轮注入。
      */
-    suspend fun drive(loop: AgentLoop, initialText: String? = null) {
+    suspend fun drive(
+        loop: AgentLoop,
+        initialText: String? = null,
+        onToken: ((String) -> Unit)? = null,
+    ) {
         try {
-            if (initialText != null) loop.runTurn(initialText)
+            if (initialText != null) loop.runTurn(initialText, emptyList(), onToken)
             while (true) {
                 when (val action = queue.nextTurnAction() ?: break) {
-                    TurnAction.ResumeAfterSteer -> loop.resumeTurn()
+                    TurnAction.ResumeAfterSteer -> loop.resumeTurn(onToken)
                     is TurnAction.NewTurn -> loop.runTurn(
                         action.input.text,
                         tags = if (action.input.isSteer) listOf(AgentLoop.TAG_STEER) else emptyList(),
+                        onToken = onToken,
                     )
                 }
             }

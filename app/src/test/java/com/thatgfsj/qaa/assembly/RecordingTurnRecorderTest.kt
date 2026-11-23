@@ -5,12 +5,16 @@ import com.thatgfsj.qaa.core.harness.JsonlTurnRecorder
 import com.thatgfsj.qaa.core.harness.SessionRole
 import com.thatgfsj.qaa.core.harness.TreeSessionStore
 import com.thatgfsj.qaa.core.harness.TurnRole
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 会话记录适配单测：本轮文本累积、工具调用 JSON 过滤、压缩视图转提示历史。 */
+/** 会话记录适配单测：本轮文本累积、工具调用 JSON 过滤、压缩视图转提示历史、流式步去重。 */
+@OptIn(ExperimentalCoroutinesApi::class)
 class RecordingTurnRecorderTest {
 
     private fun recorder(store: TreeSessionStore): RecordingTurnRecorder =
@@ -99,5 +103,76 @@ class RecordingTurnRecorderTest {
         // 工具结果不进入本轮助手文本（由终端另行渲染 [TOOL] 行）。
         assertEquals("", recorder.turnAssistantText())
         assertTrue(store.nodeCount() == 1)
+    }
+
+    // ---- token 级流式（Issue #64） ----
+
+    private fun streamingRecorder(
+        store: TreeSessionStore,
+        relay: AssistantTokenRelay,
+    ): RecordingTurnRecorder = RecordingTurnRecorder(
+        delegate = JsonlTurnRecorder(store),
+        compactedView = { CompactedView(history = store.snapshot(), summaries = emptyList()) },
+        tokenRelay = relay,
+    )
+
+    @Test
+    fun 已流式的生成步不再整段重发助手事件() = runTest {
+        val store = TreeSessionStore("test-session")
+        val relay = AssistantTokenRelay()
+        val recorder = streamingRecorder(store, relay)
+        val events = mutableListOf<AgentEvent>()
+        backgroundScope.launch { recorder.events.collect { events += it } }
+        runCurrent()
+
+        recorder.beginTurn()
+        relay.emit("回答")
+        recorder.appendAssistant("回答", emptyList(), 0, null, 0)
+        runCurrent()
+
+        assertTrue(events.none { it.kind == AgentEventKind.ASSISTANT })
+        assertEquals("回答", recorder.turnAssistantText())
+    }
+
+    @Test
+    fun 未流式的生成步仍整段回显助手事件() = runTest {
+        val store = TreeSessionStore("test-session")
+        val recorder = streamingRecorder(store, AssistantTokenRelay())
+        val events = mutableListOf<AgentEvent>()
+        backgroundScope.launch { recorder.events.collect { events += it } }
+        runCurrent()
+
+        recorder.beginTurn()
+        recorder.appendAssistant("整段回答", emptyList(), 0, null, 0)
+        runCurrent()
+
+        assertEquals(
+            listOf("整段回答"),
+            events.filter { it.kind == AgentEventKind.ASSISTANT }.map { it.text },
+        )
+    }
+
+    @Test
+    fun 工具调用JSON步以空文本收口供UI丢弃() = runTest {
+        val store = TreeSessionStore("test-session")
+        val relay = AssistantTokenRelay()
+        val recorder = streamingRecorder(store, relay)
+        val streamEvents = mutableListOf<AssistantStreamEvent>()
+        backgroundScope.launch { relay.events.collect { streamEvents += it } }
+        runCurrent()
+
+        recorder.beginTurn()
+        relay.emit("工具调用中")
+        recorder.appendAssistant(
+            """{"tool":"read","args":{"path":"a.txt"}}""",
+            emptyList(),
+            0,
+            null,
+            0,
+        )
+        runCurrent()
+
+        assertEquals(AssistantStreamEvent.Finished(1, ""), streamEvents.last())
+        assertEquals("", recorder.turnAssistantText())
     }
 }

@@ -38,6 +38,11 @@ class TerminalViewModel internal constructor(
     private var nextEntryId = 1L
     private var nextToolRequestId = 1L
 
+    /** 当前流式 AI 行：streamId 由装配层发放，entryId 为对话行键，成对出现与清空。 */
+    private var activeStreamId: Long? = null
+    private var activeStreamEntryId: Long? = null
+    private var nextStreamId = 1L
+
     private var fakeMetricsJob: Job? = null
 
     init {
@@ -113,8 +118,82 @@ class TerminalViewModel internal constructor(
         }
     }
 
+    // ---- token 级流式入口（装配层把运行链的 token 事件流接到这里） ----
+
+    /**
+     * 开启一条流式 AI 行（占位）：生成步开始、首个 token 到达前由装配层调用。
+     *
+     * [streamId] 与 [appendToken] / [endAssistantTurn] 配对，用于迟到 / 乱序事件防护；
+     * 已有未收口行时先定稿，避免两段生成写进同一行。返回本次流的标识。
+     */
+    fun beginAssistantTurn(streamId: Long = nextStreamId): Long {
+        endAssistantTurn()
+        if (streamId >= nextStreamId) nextStreamId = streamId + 1
+        val entryId = nextEntryId
+        nextEntryId += 1
+        activeStreamId = streamId
+        activeStreamEntryId = entryId
+        updateState { state ->
+            state.copy(
+                entries = state.entries + TerminalEntry(entryId, TerminalRole.AI, ""),
+                followOutput = true,
+            )
+        }
+        return streamId
+    }
+
+    /**
+     * 增量追加到当前 AI 行：空片段忽略；[streamId] 为空表示追加当前流，
+     * 显式传入且与当前流不符（迟到 / 乱序）时整条忽略。
+     */
+    fun appendToken(text: String, streamId: Long? = null) {
+        if (text.isEmpty()) return
+        val active = activeStreamId ?: return
+        if (streamId != null && streamId != active) return
+        val entryId = activeStreamEntryId ?: return
+        updateState { state ->
+            state.copy(
+                entries = state.entries.map {
+                    if (it.id == entryId) it.copy(text = it.text + text) else it
+                },
+                followOutput = true,
+            )
+        }
+    }
+
+    /**
+     * 当前 AI 行定稿：生成步结束后由装配层调用。[text] 为该步最终可见文本——
+     * 空串表示整步只有工具调用 JSON（丢弃该行），null 表示异常中断（保留已流式内容）。
+     * [streamId] 不匹配的收口事件忽略；已定稿的行不再接受后续片段。
+     */
+    fun endAssistantTurn(streamId: Long? = null, text: String? = null) {
+        val active = activeStreamId ?: return
+        if (streamId != null && streamId != active) return
+        val entryId = activeStreamEntryId
+        activeStreamId = null
+        activeStreamEntryId = null
+        if (entryId == null) return
+        updateState { state ->
+            val index = state.entries.indexOfFirst { it.id == entryId }
+            if (index < 0) {
+                state
+            } else {
+                val current = state.entries[index]
+                val finalText = text ?: current.text
+                val entries = if (finalText.isBlank()) {
+                    state.entries.filterNot { it.id == entryId }
+                } else {
+                    state.entries.toMutableList().also { it[index] = current.copy(text = finalText) }
+                }
+                state.copy(entries = entries)
+            }
+        }
+    }
+
     /** 进入空会话：清空对话与确认区、恢复滚动跟随（「清屏再渲染」由命令层 Issue #10 驱动）。 */
     fun resetSession() {
+        activeStreamId = null
+        activeStreamEntryId = null
         updateState { state ->
             state.copy(
                 entries = emptyList(),

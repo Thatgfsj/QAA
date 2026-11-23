@@ -142,6 +142,17 @@ suspend fun runTurn(userText: String) {
 }
 ```
 
+### 1.6 token 级流式回显（Issue #64）
+
+`runTurn` / `resumeTurn` 接受可选 `onToken: ((String) -> Unit)?`（默认 null 零破坏），
+原样传给 `LlmEngineGateway.streamGenerate(messages, onToken)`：每个生成步的引擎片段经
+`SteerTurnDriver.drive` 逐层透传到装配层，由 `AssistantTokenRelay` 以生成步粒度转成
+Started / Delta / Finished 事件，Terminal 前端据此开启占位 AI 行、增量追加并在步末定稿。
+落树仍以整步 `GenerationOutput.text` 为准，未传回调时行为与既有一致。
+
+- 工具调用 JSON 的生成步在步末以空文本收口，UI 丢弃该临时行，保持「调用 JSON 不进对话区」；
+- 压缩摘要等内部生成走装配层的独立引擎调用，不经过该回调，token 不外透。
+
 ## 2. AgentConfig 契约（:core-harness）
 
 ### 2.1 契约定义（与 ARCHITECTURE.md 第 3 节逐字一致）

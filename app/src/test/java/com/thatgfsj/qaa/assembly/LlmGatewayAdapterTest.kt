@@ -80,6 +80,20 @@ class LlmGatewayAdapterTest {
     }
 
     @Test
+    fun token事件逐个转发到回调且聚合文本不变() = runTest {
+        val received = mutableListOf<String>()
+        val adapter = LlmGatewayAdapter(FakeEngine(metrics, tokens = listOf("A", "B", "C")))
+
+        val output = adapter.streamGenerate(
+            listOf(PromptMessage(PromptRole.USER, "hi")),
+            onToken = { received += it },
+        )
+
+        assertEquals(listOf("A", "B", "C"), received)
+        assertEquals("ABC", output.text)
+    }
+
+    @Test
     fun 统计栏快照使用实测指标并累计已用token() = runTest {
         val adapter = LlmGatewayAdapter(FakeEngine(metrics))
         adapter.streamGenerate(listOf(PromptMessage(PromptRole.USER, "你好")))

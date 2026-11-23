@@ -25,24 +25,37 @@ class AgentLoop(
     private val confirmationInterrupt: ConfirmationInterrupt? = null,
 ) {
 
-    /** 运行一个用户轮次（user 节点不带标签）。 */
-    suspend fun runTurn(userText: String) = runTurn(userText, emptyList())
+    /** 运行一个用户轮次（user 节点不带标签，不转发 token）。 */
+    suspend fun runTurn(userText: String) = runTurn(userText, emptyList(), null)
 
     /**
      * 运行一个用户轮次，user 节点携带 [tags]（转向注入用 tags=[AgentLoop.TAG_STEER]）。
      * 终止条件四类（设计文档 1.3）：无工具调用 / 步数预算耗尽收尾 / 解析重试耗尽降级 /
      * 工具步边界用户打断；打断后由装配层据 [TurnAction.ResumeAfterSteer] 调用 [resumeTurn]。
+     *
+     * [onToken] 为 token 级流式回调：每个生成步把引擎片段原样转发给装配层，供 UI 增量
+     * 回显；null（默认）表示调用方只要整步文本，落树语义与行为完全不变。本类自身不发起
+     * 摘要生成，压缩走装配层的独立引擎调用，因此压缩期间的 token 不会经过此回调。
      */
-    suspend fun runTurn(userText: String, tags: List<String>) = runLoop(userText, tags)
+    suspend fun runTurn(
+        userText: String,
+        tags: List<String>,
+        onToken: ((String) -> Unit)? = null,
+    ) = runLoop(userText, tags, onToken)
 
     /**
      * 续跑生成而不追加 user 节点：工具步边界转向时转向文本已由本类以 tags=[steer]
      * 入树，装配层据 [TurnAction.ResumeAfterSteer] 调用本方法自当前上下文重新生成
-     * （设计文档 7.1）。
+     * （设计文档 7.1）。[onToken] 与 [runTurn] 同义，续跑生成的片段同样转发。
      */
-    suspend fun resumeTurn() = runLoop(null, emptyList())
+    suspend fun resumeTurn(onToken: ((String) -> Unit)? = null) =
+        runLoop(null, emptyList(), onToken)
 
-    private suspend fun runLoop(userText: String?, tags: List<String>) {
+    private suspend fun runLoop(
+        userText: String?,
+        tags: List<String>,
+        onToken: ((String) -> Unit)?,
+    ) {
         if (userText != null) recorder.appendUser(userText, tags)
         var step = 0
         var parseFailures = 0
@@ -51,7 +64,8 @@ class AgentLoop(
 
         while (true) {
             val messages = assembler.assemble(recorder.snapshot(), notice = notice)
-            val output = engine.streamGenerate(messages)
+            // 生成步逐 token 透传；未传回调时退化为空实现，聚合与落树仍走 output.text。
+            val output = engine.streamGenerate(messages) { onToken?.invoke(it) }
 
             if (toolsDisabled) {
                 // 收尾/降级路径：末次生成不做工具解析，文本落树后结束。

@@ -1,8 +1,11 @@
 package com.thatgfsj.qaa.feature.normal.chat
 
 import com.thatgfsj.qaa.feature.normal.model.ChatRole
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -94,5 +97,33 @@ class ChatViewModelTest {
         assertEquals("write 路径=\"a.txt\"", vm.toolConfirmPending.value)
         vm.setToolConfirmPending("   ")
         assertNull(vm.toolConfirmPending.value)
+    }
+
+    @Test
+    fun 真实端口_生成中逐token渲染且终稿以端口返回为准() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+        val renders = mutableListOf<String>()
+        val finished = CompletableDeferred<Unit>()
+        val port = object : NormalAgentPort {
+            override val assistantTokens: Flow<String> = flow {
+                emit("片")
+                renders += vm.messages.value.last().content
+                emit("段")
+                renders += vm.messages.value.last().content
+                finished.complete(Unit)
+            }
+
+            override suspend fun ask(text: String): String {
+                finished.await()
+                return "最终答复"
+            }
+        }
+        vm.bindAgent(port)
+        vm.send("你好")
+        advanceUntilIdle()
+
+        assertEquals(listOf("片", "片段"), renders)
+        assertEquals("最终答复", vm.messages.value.last().content)
+        assertFalse(vm.isGenerating.value)
     }
 }
