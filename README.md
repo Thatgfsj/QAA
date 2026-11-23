@@ -55,8 +55,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 不在每次 PR 运行 CI，构建阶段统一运行构建与测试。
 - 面向用户文案一律使用清晰准确的中文。
 
-详见 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)。
-
 ## 许可证
 
 [GPL-3.0-or-later](LICENSE)
