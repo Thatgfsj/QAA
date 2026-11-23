@@ -6,7 +6,7 @@ package com.thatgfsj.qaa.core.harness
  *
  * 无死循环双重封顶（设计文档 1.2）：
  * - 工具步硬顶 [AgentConfig.maxToolSteps]（Deny 同样计步）；
- * - 解析重试上限 [PARSE_RETRY_LIMIT]；
+ * - 连续解析重试上限 [PARSE_RETRY_LIMIT]；
  * 任一路径触发后禁用工具解析、文本收尾一次后结束。
  */
 class AgentLoop(
@@ -40,19 +40,33 @@ class AgentLoop(
 
             if (toolsDisabled) {
                 // 收尾/降级路径：末次生成不做工具解析，文本落树后结束。
-                recorder.appendAssistant(output.text, parseRetries = parseFailures)
+                recorder.appendAssistant(
+                    output.text,
+                    parseRetries = parseFailures,
+                    metrics = output.metrics,
+                    stepIndex = step,
+                )
                 return
             }
 
             when (val parsed = parser.parse(output.text)) {
                 ParseOutcome.NoToolCall -> {
-                    recorder.appendAssistant(output.text)
+                    recorder.appendAssistant(
+                        output.text,
+                        metrics = output.metrics,
+                        stepIndex = step,
+                    )
                     return
                 }
 
                 is ParseOutcome.Invalid -> {
                     parseFailures++
-                    recorder.appendAssistant(output.text, parseRetries = parseFailures)
+                    recorder.appendAssistant(
+                        output.text,
+                        parseRetries = parseFailures,
+                        metrics = output.metrics,
+                        stepIndex = step,
+                    )
                     if (parseFailures > PARSE_RETRY_LIMIT) {
                         // 设计文档 4.3：注入一次性降级提示并禁用工具。
                         notice = PromptAssembler.DEMOTION_NOTICE
@@ -65,10 +79,18 @@ class AgentLoop(
                 }
 
                 is ParseOutcome.Calls -> {
-                    recorder.appendAssistant(output.text, toolCalls = parsed.calls)
+                    // 设计文档 4.3：解析重试按“连续”计数，合法调用落地即清零。
+                    parseFailures = 0
+                    recorder.appendAssistant(
+                        output.text,
+                        toolCalls = parsed.calls,
+                        metrics = output.metrics,
+                        stepIndex = step,
+                    )
                     for (call in parsed.calls) {
-                        val outcome = executeWithConfirmation(call)
-                        recorder.appendTool(call, outcome)
+                        val stepIndex = step
+                        val outcome = executeWithConfirmation(call, stepIndex)
+                        recorder.appendTool(call, outcome, stepIndex)
                         step++
                         val steerText = interruptCheck?.invoke()
                         if (steerText != null) {
@@ -89,17 +111,29 @@ class AgentLoop(
     /**
      * 确认门（设计文档 3.6）：requiresConfirmation 且非 YOLO 时挂起等待 Allow/Deny；
      * Deny 生成 DENIED 固定话术回注。yoloMode 默认 false（AgentConfig 契约）。
+     *
+     * [stepIndex] 为当前工具步序号；执行耗时在 Loop 侧计时后写入 [ToolOutcome.durationMs]。
      */
-    private suspend fun executeWithConfirmation(call: ToolCall): ToolOutcome {
+    private suspend fun executeWithConfirmation(call: ToolCall, stepIndex: Int): ToolOutcome {
         val needConfirm = !config.yoloMode && tools.requiresConfirmation(call.tool)
-        if (!needConfirm) return tools.execute(call)
+        if (!needConfirm) return executeMeasured(call, stepIndex)
         return when (gate.awaitConfirmation(call)) {
-            ConfirmationDecision.ALLOW -> tools.execute(call)
+            ConfirmationDecision.ALLOW -> executeMeasured(call, stepIndex)
             ConfirmationDecision.DENY -> ToolOutcome(
                 status = ToolOutcomeStatus.DENIED,
                 output = DENIED_REPLY,
+                durationMs = 0,
             )
         }
+    }
+
+    /** 执行工具并计时（设计文档 3.4/5.3：tool 节点携带 durationMs）。 */
+    private suspend fun executeMeasured(call: ToolCall, stepIndex: Int): ToolOutcome {
+        val startedNanos = System.nanoTime()
+        val outcome = tools.execute(call, stepIndex)
+        return outcome.copy(
+            durationMs = (System.nanoTime() - startedNanos) / NANOS_PER_MILLI,
+        )
     }
 
     companion object {
@@ -109,5 +143,7 @@ class AgentLoop(
 
         /** Deny 固定话术（设计文档 3.4）。 */
         const val DENIED_REPLY = "已拒绝执行该工具，建议改用纯文字回答或调整方案。"
+
+        private const val NANOS_PER_MILLI = 1_000_000L
     }
 }

@@ -15,11 +15,20 @@ data class PromptMessage(val role: PromptRole, val content: String)
 /** 单个工具调用（解析产物；argsJson 保持原始 JSON 字符串，参数校验归执行侧）。 */
 data class ToolCall(val tool: String, val argsJson: String)
 
-/** 引擎生成指标（backend 为实际命中后端字符串，引用 :core-inference 契约值）。 */
+/**
+ * 引擎生成指标（设计文档 5.2/5.3 assistant.metrics 的引擎侧字段）。
+ *
+ * backend 为实际命中后端字符串（引用 :core-inference 契约值）；promptTokens、
+ * completionTokens、durationMs 由 GenieX 实现侧尽力填充，缺省不阻断落树。
+ * stepIndex/parseRetries 由 AgentLoop 记录在节点上。
+ */
 data class GenerationMetrics(
     val backend: String? = null,
     val ttftMs: Long? = null,
     val tokensPerSec: Float? = null,
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val durationMs: Long? = null,
 )
 
 data class GenerationOutput(
@@ -42,13 +51,20 @@ data class ToolOutcome(
     val status: ToolOutcomeStatus,
     val output: String,
     val errorCode: String? = null,
+    /** 执行耗时（毫秒）；由 AgentLoop 执行后计时填充，DENIED 记 0。 */
+    val durationMs: Long? = null,
 )
 
 /** 工具执行端口：实现侧为 :core-tools 统一路由（Issue #12 工具层议题）。 */
 interface ToolExecutorGateway {
     /** 是否需要用户确认（read=false；write/edit/draw_image=true，设计文档 3.3）。 */
     suspend fun requiresConfirmation(toolName: String): Boolean
-    suspend fun execute(call: ToolCall): ToolOutcome
+
+    /**
+     * 执行单个调用。[stepIndex] 为本轮次内工具步序号（从 0 起，Deny 同样占一步），
+     * 供实现侧构造 ToolContext（设计文档 3.2）；sessionId/sandbox/limits 由装配层构造。
+     */
+    suspend fun execute(call: ToolCall, stepIndex: Int): ToolOutcome
 }
 
 /** 确认决策。 */
@@ -62,12 +78,21 @@ interface ConfirmationGate {
 /** 会话节点内存视图（落盘 schema 由 TreeSessionStore 议题按设计文档 5.2 对齐）。 */
 enum class TurnRole { USER, ASSISTANT, TOOL }
 
+/**
+ * 会话节点。[metrics] 仅 assistant 使用；[stepIndex] 对 assistant 为生成时的工具步序号，
+ * 对 tool 为执行步序号；[toolStatus]/[errorCode]/[durationMs] 仅 tool 使用（设计文档 5.3）。
+ */
 data class TurnNode(
     val role: TurnRole,
     val content: String,
     val toolCalls: List<ToolCall> = emptyList(),
     val tags: List<String> = emptyList(),
     val parseRetries: Int = 0,
+    val metrics: GenerationMetrics? = null,
+    val stepIndex: Int? = null,
+    val toolStatus: ToolOutcomeStatus? = null,
+    val errorCode: String? = null,
+    val durationMs: Long? = null,
 )
 
 /** 会话记录端口：实现侧为 TreeSessionStore（JSONL append-only，设计文档第 5 章）。 */
@@ -77,8 +102,10 @@ interface TurnRecorder {
         text: String,
         toolCalls: List<ToolCall> = emptyList(),
         parseRetries: Int = 0,
+        metrics: GenerationMetrics? = null,
+        stepIndex: Int = 0,
     )
-    suspend fun appendTool(call: ToolCall, outcome: ToolOutcome)
+    suspend fun appendTool(call: ToolCall, outcome: ToolOutcome, stepIndex: Int)
     /** 解析纠错等系统级回注（role=TOOL 消息，不属任何工具步）。 */
     suspend fun appendSystemNotice(text: String)
     suspend fun snapshot(): List<TurnNode>

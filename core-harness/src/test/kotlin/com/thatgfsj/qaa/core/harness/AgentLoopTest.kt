@@ -2,12 +2,15 @@ package com.thatgfsj.qaa.core.harness
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * AgentLoop JVM 单测（设计附录 A.1 指定子集）：
- * L1 纯文本 / L3 多工具链 / L5 Deny / L4 maxToolSteps 收尾 / L8 解析降级 / L6 工具步打断。
+ * L1 纯文本 / L3 多工具链 / L5 Deny / L4 maxToolSteps 收尾 / L8 解析降级 / L6 工具步打断；
+ * 另覆盖工具步序号透传、生成/工具指标落树、连续解析失败重置与 Deny 计步收尾。
  */
 class AgentLoopTest {
 
@@ -60,7 +63,8 @@ class AgentLoopTest {
         loop(engine = engine, tools = tools, gate = gate, recorder = recorder)
             .runTurn("处理 a.txt")
 
-        assertEquals(listOf("read", "edit", "write"), tools.executed.map { it.tool })
+        assertEquals(listOf("read", "edit", "write"), tools.executed.map { it.call.tool })
+        assertEquals(listOf(0, 1, 2), tools.executed.map { it.stepIndex })
         assertEquals(4, engine.receivedMessages.size)
         val toolNodes = recorder.nodes.filter { it.role == TurnRole.TOOL && it.tags.isEmpty() }
         assertEquals(3, toolNodes.size)
@@ -80,27 +84,33 @@ class AgentLoopTest {
         assertTrue(tools.executed.isEmpty()) // Deny 不执行
         val toolNode = recorder.nodes.single { it.role == TurnRole.TOOL && it.tags.isEmpty() }
         assertEquals(AgentLoop.DENIED_REPLY, toolNode.content)
+        assertEquals(ToolOutcomeStatus.DENIED, toolNode.toolStatus)
         assertEquals(2, engine.receivedMessages.size) // Deny 回注后终答
     }
 
     @Test
-    fun L4_maxToolSteps硬顶_注入收尾提示() = runTest {
-        val engine = FakeLlmEngine(
-            List(12) { readJson } + listOf("基于已读取内容，整理如下。")
-        )
+    fun L4_maxToolSteps硬顶_末次生成禁用工具解析() = runTest {
+        // 第 13 条仍是工具调用 JSON，用于证明 toolsDisabled 生效而非自然收尾。
+        val engine = FakeLlmEngine(List(12) { readJson } + listOf(readJson))
         val tools = FakeToolGateway()
         val recorder = InMemoryTurnRecorder()
         loop(engine = engine, tools = tools, recorder = recorder).runTurn("连续读取")
 
-        assertEquals(12, tools.executed.size) // 12 步硬顶
+        assertEquals(12, tools.executed.size) // 12 步硬顶，第 13 条 JSON 不再执行
         assertEquals(13, engine.receivedMessages.size)
-        // 第 13 次生成禁用工具解析，直接落树收尾。
+        // 收尾提示只注入一次（仅第 13 次生成）。
+        val noticePrompts = engine.receivedMessages.count { messages ->
+            messages.any { it.content == PromptAssembler.STEP_BUDGET_NOTICE }
+        }
+        assertEquals(1, noticePrompts)
         assertEquals(
             PromptAssembler.STEP_BUDGET_NOTICE,
             engine.receivedMessages.last().last().content,
         )
+        // 第 13 次生成原样落树：内容仍是 JSON，但不解析、不产生 toolCalls。
         val finalAssistant = recorder.nodes.last()
         assertEquals(TurnRole.ASSISTANT, finalAssistant.role)
+        assertEquals(readJson, finalAssistant.content)
         assertEquals(0, finalAssistant.toolCalls.size)
         assertEquals(
             12,
@@ -144,5 +154,105 @@ class AgentLoopTest {
         val steerNode = recorder.nodes.last()
         assertEquals(TurnRole.USER, steerNode.role)
         assertTrue(AgentLoop.TAG_STEER in steerNode.tags)
+    }
+
+    @Test
+    fun B1_工具执行携带步序号_Deny占步且后续递增() = runTest {
+        val engine = FakeLlmEngine(listOf(readJson, writeJson, readJson, "处理完成。"))
+        val tools = FakeToolGateway()
+        val gate = FakeConfirmationGate(listOf(ConfirmationDecision.DENY))
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, gate = gate, recorder = recorder)
+            .runTurn("读取并写入")
+
+        // write 被 Deny 不执行，但仍占第 1 步；后续 read 的步序号为 2。
+        assertEquals(listOf("read", "read"), tools.executed.map { it.call.tool })
+        assertEquals(listOf(0, 2), tools.executed.map { it.stepIndex })
+        assertEquals(1, gate.seen.size)
+        val toolNodes = recorder.nodes.filter { it.role == TurnRole.TOOL && it.tags.isEmpty() }
+        assertEquals(listOf(0, 1, 2), toolNodes.map { it.stepIndex })
+        assertEquals(ToolOutcomeStatus.DENIED, toolNodes[1].toolStatus)
+    }
+
+    @Test
+    fun B2_生成与工具指标落树() = runTest {
+        val metrics = GenerationMetrics(
+            backend = "HYBRID",
+            ttftMs = 210,
+            tokensPerSec = 18.4f,
+            promptTokens = 1350,
+            completionTokens = 96,
+            durationMs = 4200,
+        )
+        val engine = FakeLlmEngine(listOf(readJson, "完成。"), metrics = metrics)
+        val tools = FakeToolGateway()
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, recorder = recorder).runTurn("读文件")
+
+        val assistantNodes = recorder.nodes.filter { it.role == TurnRole.ASSISTANT }
+        assertEquals(2, assistantNodes.size)
+        assertTrue(assistantNodes.all { it.metrics == metrics })
+        assertEquals(listOf(0, 1), assistantNodes.map { it.stepIndex })
+
+        val toolNode = recorder.nodes.single { it.role == TurnRole.TOOL && it.tags.isEmpty() }
+        assertEquals(0, toolNode.stepIndex)
+        assertEquals(ToolOutcomeStatus.SUCCESS, toolNode.toolStatus)
+        assertNotNull(toolNode.durationMs)
+        assertTrue(toolNode.durationMs!! >= 0)
+    }
+
+    @Test
+    fun S1_解析失败按连续计数_合法调用后重置() = runTest {
+        val dirtyJson = """{"tool": "read", "args": {"path": "a.txt"""" // 截断脏 JSON
+        val engine = FakeLlmEngine(
+            listOf(dirtyJson, dirtyJson, readJson, dirtyJson, "直接回答。")
+        )
+        val tools = FakeToolGateway()
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, recorder = recorder).runTurn("读文件")
+
+        assertEquals(5, engine.receivedMessages.size)
+        // 第 4 次生成时连续失败计数已从 0 重新开始，不应触发降级。
+        assertTrue(
+            engine.receivedMessages.none { messages ->
+                messages.any { it.content == PromptAssembler.DEMOTION_NOTICE }
+            }
+        )
+        assertEquals(1, tools.executed.size)
+        assertEquals(
+            listOf(1, 2, 0, 1, 0),
+            recorder.nodes.filter { it.role == TurnRole.ASSISTANT }.map { it.parseRetries },
+        )
+    }
+
+    @Test
+    fun S9_Deny计步触发步数预算收尾() = runTest {
+        val engine = FakeLlmEngine(listOf(writeJson, "好的，改用文字说明。"))
+        val gate = FakeConfirmationGate(listOf(ConfirmationDecision.DENY))
+        val recorder = InMemoryTurnRecorder()
+        loop(
+            config = AgentConfig(maxToolSteps = 1),
+            engine = engine,
+            gate = gate,
+            recorder = recorder,
+        ).runTurn("写文件")
+
+        assertEquals(2, engine.receivedMessages.size)
+        // Deny 记 1 步 → 第 2 次生成收到一次性预算收尾提示，证明 Deny 计步生效。
+        assertEquals(
+            PromptAssembler.STEP_BUDGET_NOTICE,
+            engine.receivedMessages.last().last().content,
+        )
+        assertTrue(
+            engine.receivedMessages.first().none {
+                it.content == PromptAssembler.STEP_BUDGET_NOTICE
+            }
+        )
+        val toolNode = recorder.nodes.single { it.role == TurnRole.TOOL && it.tags.isEmpty() }
+        assertEquals(ToolOutcomeStatus.DENIED, toolNode.toolStatus)
+        assertEquals(AgentLoop.DENIED_REPLY, toolNode.content)
+        assertEquals(0, toolNode.stepIndex)
+        assertNull(toolNode.errorCode)
+        assertNotNull(toolNode.durationMs)
     }
 }

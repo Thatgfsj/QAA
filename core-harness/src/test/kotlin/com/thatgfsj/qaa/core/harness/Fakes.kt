@@ -2,7 +2,8 @@ package com.thatgfsj.qaa.core.harness
 
 /**
  * 会话记录内存替身（设计附录 A.0）：
- * appendSystemNotice 以 tags=[correction] 落为 TOOL 节点，与真实纠错回注形态一致。
+ * appendSystemNotice 以 tags=[correction] 落为 TOOL 节点，与真实纠错回注形态一致；
+ * appendTool 透传 outcome 的终态、错误码、耗时与工具步序号（设计文档 5.3）。
  */
 class InMemoryTurnRecorder : TurnRecorder {
 
@@ -16,15 +17,27 @@ class InMemoryTurnRecorder : TurnRecorder {
         text: String,
         toolCalls: List<ToolCall>,
         parseRetries: Int,
+        metrics: GenerationMetrics?,
+        stepIndex: Int,
     ) {
         nodes += TurnNode(
             TurnRole.ASSISTANT, text,
-            toolCalls = toolCalls, parseRetries = parseRetries,
+            toolCalls = toolCalls,
+            parseRetries = parseRetries,
+            metrics = metrics,
+            stepIndex = stepIndex,
         )
     }
 
-    override suspend fun appendTool(call: ToolCall, outcome: ToolOutcome) {
-        nodes += TurnNode(TurnRole.TOOL, outcome.output, toolCalls = listOf(call))
+    override suspend fun appendTool(call: ToolCall, outcome: ToolOutcome, stepIndex: Int) {
+        nodes += TurnNode(
+            TurnRole.TOOL, outcome.output,
+            toolCalls = listOf(call),
+            stepIndex = stepIndex,
+            toolStatus = outcome.status,
+            errorCode = outcome.errorCode,
+            durationMs = outcome.durationMs,
+        )
     }
 
     override suspend fun appendSystemNotice(text: String) {
@@ -49,10 +62,13 @@ class FakeConfirmationGate(
     }
 }
 
+/** 工具执行记录（步序号用于断言 AgentLoop 的步序透传，Issue #12）。 */
+data class ExecutedCall(val call: ToolCall, val stepIndex: Int)
+
 /** 脚本化工具执行替身（设计附录 A.0）：requiresConfirmation 按 3.3 契约，执行恒 SUCCESS。 */
 class FakeToolGateway : ToolExecutorGateway {
 
-    val executed = mutableListOf<ToolCall>()
+    val executed = mutableListOf<ExecutedCall>()
 
     override suspend fun requiresConfirmation(toolName: String): Boolean = when (toolName) {
         "read" -> false
@@ -60,8 +76,8 @@ class FakeToolGateway : ToolExecutorGateway {
         else -> true
     }
 
-    override suspend fun execute(call: ToolCall): ToolOutcome {
-        executed += call
+    override suspend fun execute(call: ToolCall, stepIndex: Int): ToolOutcome {
+        executed += ExecutedCall(call, stepIndex)
         return ToolOutcome(
             status = ToolOutcomeStatus.SUCCESS,
             output = "（模拟执行成功）${call.tool} 已处理",
