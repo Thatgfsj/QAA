@@ -1,6 +1,6 @@
 # QAA · Qualcomm Agent App
 
-![minSdk](https://img.shields.io/badge/minSdk-27-blue) ![abi](https://img.shields.io/badge/ABI-arm64--v8a-orange) ![GenieX](https://img.shields.io/badge/Qualcomm%20GenieX-0.10.0-3253DC) ![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF) ![License](https://img.shields.io/badge/License-Apache--2.0-green)
+![minSdk](https://img.shields.io/badge/minSdk-27-blue) ![abi](https://img.shields.io/badge/ABI-arm64--v8a-orange) ![GenieX](https://img.shields.io/badge/Qualcomm%20GenieX-0.10.0-3253DC) ![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF) ![License](https://img.shields.io/badge/License-GPL--3.0-blue)
 
 运行在 **高通骁龙 8 Gen 2 ~ 8 Elite Gen 5** 手机上的原生 Android 智能体 App：端侧本地运行大语言模型（LLM）与画图模型，采用 **Pi 风格极简 Agent Harness**，实现可控、低延迟、可回溯的端侧智能体工作流，并为 PC 远控与端侧模型微调预留标准扩展接口。
 
@@ -59,4 +59,4 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 许可证
 
-[Apache-2.0](LICENSE)
+[GPL-3.0-or-later](LICENSE)
