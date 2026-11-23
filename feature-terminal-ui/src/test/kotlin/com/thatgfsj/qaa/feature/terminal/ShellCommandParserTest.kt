@@ -346,6 +346,20 @@ class ShellCommandParserTest {
     }
 
     @Test
+    fun newSessionEmitsNewSessionEffect() {
+        val result = parse("/new", session)
+        assertEquals(ShellStage.SESSION, result.stage)
+        assertEquals(listOf(ShellEffect.NewSession), result.effects)
+        assertTrue(result.output.isEmpty())
+    }
+
+    @Test
+    fun newSessionRejectsArgumentsAndShellState() {
+        assertTrue(parse("/new now", session).text().contains("不接受参数"))
+        assertTrue(parse("/new").text().contains("未知命令：/new"))
+    }
+
+    @Test
     fun treeEmitsQueryEffect() {
         val result = parse("/tree", session)
         assertEquals(listOf(ShellEffect.QueryTree), result.effects)

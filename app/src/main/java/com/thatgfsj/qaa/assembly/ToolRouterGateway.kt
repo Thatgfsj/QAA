@@ -19,16 +19,24 @@ import com.thatgfsj.qaa.core.tools.WriteTool
  * 工具执行端口适配（HarnessPorts.ToolExecutorGateway ⇄ core-tools 四原语工具）。
  *
  * 每次执行按 Agent Loop 传入的 [ToolCall] 与工具步序号构造 [ToolContext]：
- * sessionId 固定当前会话、sandbox 为 App 私有目录默认授权根（外部目录可动态挂载）、
+ * sessionId 跟随当前会话（/new 切换后重绑）、sandbox 为 App 私有目录默认授权根（外部目录可动态挂载）、
  * limits 取默认截断预算。
  * 确认需求由工具自身声明（read=false；write/edit/draw_image=true），Loop 据此走确认门。
  */
 class ToolRouterGateway(
     private val sandbox: SandboxFs,
-    private val sessionId: String,
+    sessionId: String,
     private val limits: ToolLimits = ToolLimits(),
     private val executors: Map<String, ToolExecutor> = emptyMap(),
 ) : ToolExecutorGateway {
+
+    @Volatile
+    private var sessionIdState: String = sessionId
+
+    /** /new 切换会话后重绑：工具上下文按当前会话记录。 */
+    fun rebindSession(id: String) {
+        sessionIdState = id
+    }
 
     override suspend fun requiresConfirmation(toolName: String): Boolean =
         executors[toolName]?.requiresConfirmation ?: false
@@ -45,7 +53,7 @@ class ToolRouterGateway(
 
     /** 按步序号构造工具上下文（sessionId / sandbox / limits 由装配层固定）。 */
     internal fun contextOf(stepIndex: Int): ToolContext = object : ToolContext {
-        override val sessionId: String = this@ToolRouterGateway.sessionId
+        override val sessionId: String get() = sessionIdState
         override val stepIndex: Int = stepIndex
         override val sandbox: SandboxFs = this@ToolRouterGateway.sandbox
         override val limits: ToolLimits = this@ToolRouterGateway.limits

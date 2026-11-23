@@ -69,6 +69,9 @@ sealed interface ShellEffect {
     /** 清屏：转 [TerminalViewModel.resetSession]。 */
     data object ClearScreen : ShellEffect
 
+    /** /new：新建空会话（清屏并切换落盘文件）。 */
+    data object NewSession : ShellEffect
+
     /** 顶栏模式切换：转 [TerminalViewModel.setMode]。 */
     data class SetMode(val mode: TerminalMode) : ShellEffect
 

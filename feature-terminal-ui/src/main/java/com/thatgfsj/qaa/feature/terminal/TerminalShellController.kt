@@ -86,10 +86,11 @@ class TerminalShellController(
                 viewModel.setModelInfo(effect.model.name, effect.model.quantization)
                 loadModel(effect.model.name)
             }
+            ShellEffect.NewSession -> startNewSession()
             is ShellEffect.SetBackend -> {
                 requestedBackend = effect.request
                 effect.request.toTerminalBackend()?.let(viewModel::setBackend)
-                // 请求后端同时交给运行链：下次载入模型时按锁定档位建会话。
+                // 请求后端同时交给运行链：引擎已加载时立即按新档位重载。
                 val port = agent
                 if (port != null) {
                     scope.launch { viewModel.appendOutput(port.lockBackend(effect.request)) }
@@ -128,6 +129,18 @@ class TerminalShellController(
                 port.runTurn(text)
             }
         }
+    }
+
+    /** /new：先清屏，再向运行链申请新会话并回显新会话 id。 */
+    private fun startNewSession() {
+        val port = agent
+        if (port == null) {
+            viewModel.appendOutput(UNWIRED_NOTICE)
+            return
+        }
+        viewModel.resetSession()
+        promptNoticeShown = false
+        scope.launch { viewModel.appendOutput(required(port.newSession())) }
     }
 
     /** 统一执行一条查询类命令：结果整段回显，异常转中文提示。 */

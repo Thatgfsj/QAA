@@ -149,7 +149,7 @@ object ShellCommandParser {
             listOf("已恢复自动降级链（请求后端 auto）；实际命中由推理结果回显。")
         } else {
             listOf(
-                "已锁定请求后端：${request.displayName}；顶栏回显同步更新，推理启动后以实际命中为准。",
+                "已锁定请求后端：${request.displayName}；引擎已加载时立即按新后端重载。",
             )
         }
         return ShellParseResult(
@@ -201,6 +201,7 @@ object ShellCommandParser {
             "/help" -> reply(context, shellHelpText())
             "/status" -> statusResult(context)
             "/exit" -> exitSession(tokens, context)
+            "/new" -> singleEffect(tokens, context, "/new", ShellEffect.NewSession)
             "/tree" -> singleEffect(tokens, context, "/tree", ShellEffect.QueryTree)
             "/fork" -> fork(tokens, context)
             "/compact" -> singleEffect(tokens, context, "/compact", ShellEffect.CompactContext)
@@ -208,7 +209,7 @@ object ShellCommandParser {
             "/skills" -> singleEffect(tokens, context, "/skills", ShellEffect.QuerySkills)
             else -> error(
                 context,
-                "未知会话命令：$head。可用命令：/exit、/tree、/fork、/compact、/steer、/skills；" +
+                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills；" +
                     "输入 /help 查看完整说明。",
             )
         }

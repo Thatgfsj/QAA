@@ -69,8 +69,11 @@ interface TerminalAgentPort {
     /** Follow-up：轮末衔接的新指令。 */
     suspend fun followUp(text: String): String
 
-    /** backend 命令：锁定请求后端（下次载入模型时交给引擎降级链）。 */
+    /** backend 命令：锁定请求后端；引擎已加载时立即按新后端重载。 */
     suspend fun lockBackend(request: BackendRequest): String
+
+    /** /new：新建空会话并切换落盘文件，返回可直接回显的中文结果。 */
+    suspend fun newSession(): String
 
     /** chat / agent 选定模型：解析清单条目并载入引擎。 */
     suspend fun selectModel(token: String): String
