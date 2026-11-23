@@ -16,19 +16,20 @@ import kotlinx.coroutines.launch
  *   [setMode] / [setModelInfo] / [setBackend] 对应 chat / agent / model / backend 命令回显；
  * - 推理层 Issue #5：[onAiChunk] 流式片段回填；metrics 经 [bindMetrics] 以
  *   StateFlow&lt;TerminalMetricsSnapshot&gt; 形状接入（骨架期接 [FakeMetricsTicker]）；
- * - 工具确认流 Issue #14：[requestToolConfirmation] / [onToolAllow] / [onToolDeny]。
+ * - 工具确认流 Issue #14：实现 [TerminalToolConfirmHost]，配合 [TerminalUiGate] 完成
+ *   挂起 / Allow / Deny / 取消清理（真实工具调用由 AgentLoop 触发）。
  *
  * 线程契约：所有变更方法在 UI 主线程（或单测线程）调用，快照更新无锁。
  */
 class TerminalViewModel internal constructor(
     metricsTicker: FakeMetricsTicker,
-) : ViewModel() {
+) : ViewModel(), TerminalToolConfirmHost {
 
     /** 无参构造：供 ViewModelProvider 默认工厂与 Issue #10 路由装配使用。 */
     constructor() : this(FakeMetricsTicker())
 
     private val _uiState = MutableStateFlow(TerminalUiState())
-    val uiState: StateFlow<TerminalUiState> = _uiState.asStateFlow()
+    override val uiState: StateFlow<TerminalUiState> = _uiState.asStateFlow()
 
     private var nextEntryId = 1L
     private var nextToolRequestId = 1L
@@ -126,7 +127,7 @@ class TerminalViewModel internal constructor(
     }
 
     /** 请求工具确认（Issue #14 确认流接入点；同一时刻仅保留最新一条待确认项）。 */
-    fun requestToolConfirmation(description: String) {
+    override fun requestToolConfirmation(description: String) {
         val trimmed = description.trim()
         if (trimmed.isEmpty()) return
         val id = nextToolRequestId
@@ -142,6 +143,17 @@ class TerminalViewModel internal constructor(
     /** 用户拒绝（Deny 按钮回调）。 */
     fun onToolDeny() {
         resolveToolConfirmation(allowed = false)
+    }
+
+    /** 挂起被取消时收起待确认项（清屏 / 轮次取消），避免遗留无人决策的按钮。 */
+    override fun dismissToolConfirmation() {
+        updateState { state ->
+            if (state.toolConfirm is ToolConfirmState.Pending) {
+                state.copy(toolConfirm = ToolConfirmState.Idle)
+            } else {
+                state
+            }
+        }
     }
 
     private fun resolveToolConfirmation(allowed: Boolean) {

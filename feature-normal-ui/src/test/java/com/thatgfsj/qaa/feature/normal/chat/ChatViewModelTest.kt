@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -83,5 +84,15 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(2, vm.messages.value.size)
         assertEquals("第一条", vm.messages.value.first().content)
+    }
+
+    @Test
+    fun 待确认描述同步_空白视为无() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+        assertNull(vm.toolConfirmPending.value)
+        vm.setToolConfirmPending("write 路径=\"a.txt\"")
+        assertEquals("write 路径=\"a.txt\"", vm.toolConfirmPending.value)
+        vm.setToolConfirmPending("   ")
+        assertNull(vm.toolConfirmPending.value)
     }
 }

@@ -28,6 +28,10 @@ class ChatViewModel(
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    /** 待确认工具描述（会话页「等待确认」提示用；决策由 NormalGate 完成）。 */
+    private val _toolConfirmPending = MutableStateFlow<String?>(null)
+    val toolConfirmPending: StateFlow<String?> = _toolConfirmPending.asStateFlow()
+
     private var nextId = 0L
 
     /**
@@ -52,6 +56,11 @@ class ChatViewModel(
             }
             _isGenerating.value = false
         }
+    }
+
+    /** 同步待确认工具描述（null 表示无）；确认门的挂起状态由装配层镜像到这里。 */
+    fun setToolConfirmPending(description: String?) {
+        _toolConfirmPending.value = description?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     /** fake 脚本化回复：按中文语感切 token，仅演示流式逐字渲染。 */
