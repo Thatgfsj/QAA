@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.thatgfsj.qaa.assembly.AgentEventKind
 import com.thatgfsj.qaa.assembly.AgentRuntime
+import com.thatgfsj.qaa.assembly.AssistantStreamEvent
 import com.thatgfsj.qaa.feature.terminal.TerminalScreen
 import com.thatgfsj.qaa.feature.terminal.TerminalShellController
 import com.thatgfsj.qaa.feature.terminal.TerminalUiGate
@@ -46,8 +47,19 @@ fun TerminalHost(
     LaunchedEffect(runtime, terminalViewModel) {
         runtime.events.collect { event ->
             when (event.kind) {
+                // 已流式上屏的生成步不再整段重放（适配层已按步去重），此处只兜底无流式引擎。
                 AgentEventKind.ASSISTANT -> terminalViewModel.onAiChunk(event.text + "\n")
                 AgentEventKind.TOOL, AgentEventKind.NOTICE -> terminalViewModel.appendOutput(event.text)
+            }
+        }
+    }
+    LaunchedEffect(runtime, terminalViewModel) {
+        runtime.assistantStream.collect { event ->
+            when (event) {
+                is AssistantStreamEvent.Started -> terminalViewModel.beginAssistantTurn(event.streamId)
+                is AssistantStreamEvent.Delta -> terminalViewModel.appendToken(event.text, event.streamId)
+                is AssistantStreamEvent.Finished ->
+                    terminalViewModel.endAssistantTurn(event.streamId, event.text)
             }
         }
     }

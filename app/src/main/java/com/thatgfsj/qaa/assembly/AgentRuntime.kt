@@ -62,6 +62,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -114,9 +115,13 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val jsonlRecorder = JsonlTurnRecorder(sessionStore)
     private val skills = SkillRegistry.fromDirectory(skillsDir)
     private val compactor = ContextCompactor(engine = llmGateway)
+
+    /** token 级流式转发器：生成步 → UI 增量行（压缩等内部生成期间静默）。 */
+    private val tokenRelay = AssistantTokenRelay()
     private val recorder = RecordingTurnRecorder(
         delegate = jsonlRecorder,
         compactedView = { compactor.view(sessionStore) },
+        tokenRelay = tokenRelay,
     )
     private val steerQueue = SteerQueue()
     private val driver = SteerTurnDriver(steerQueue)
@@ -184,6 +189,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     /** 轮次事件流（终端逐条回显）。 */
     val events: SharedFlow<AgentEvent> = recorder.events
+
+    /**
+     * 助手 token 流式事件流（生成步粒度）：Terminal 前端据此边生成边渲染，
+     * Normal 前端经 [assistantTokens] 取同源片段。
+     */
+    val assistantStream: SharedFlow<AssistantStreamEvent> = tokenRelay.events
 
     /** UI 层装配确认门（终端行内确认 / Normal 对话框）。 */
     fun bindConfirmationGate(delegate: ConfirmationGate) = gate.bind(delegate)
@@ -303,6 +314,10 @@ class AgentRuntime private constructor(private val appContext: Context) :
         return recorder.turnAssistantText().ifBlank { "（本轮没有文字答复）" }
     }
 
+    /** Normal 端流式片段：与 Terminal 同源 token；最终文本仍以 [ask] 返回值定稿。 */
+    override val assistantTokens: Flow<String> =
+        assistantStream.mapNotNull { (it as? AssistantStreamEvent.Delta)?.text }
+
     // ---- TerminalModelListPort / TerminalModelPullPort ----
 
     override suspend fun entries(): List<LocalModelEntry> = catalogToLocalEntries(catalog.list())
@@ -320,13 +335,15 @@ class AgentRuntime private constructor(private val appContext: Context) :
         _state.value = TerminalAgentState.RUNNING
         recorder.beginTurn()
         try {
-            driver.drive(loop, text)
+            driver.drive(loop, text, onToken = tokenRelay::emit)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             emitNotice("本轮执行失败：${error.message ?: error::class.simpleName}")
         } finally {
             runCatching { safePointCompact() }
+            // 异常中断也要收口当前流式行：保留已生成片段，不留下「生成中」形态。
+            tokenRelay.endTurn()
             recorder.endTurn()
             _state.value = TerminalAgentState.IDLE
         }
@@ -399,9 +416,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     private suspend fun runCompaction(block: suspend () -> CompactionResult): CompactionResult {
         llmGateway.telemetryEnabled = false
+        // 摘要生成属内部调用：token 同样不外透，避免压缩内容混入用户可见的流式行。
+        tokenRelay.silenced = true
         return try {
             block()
         } finally {
+            tokenRelay.silenced = false
             llmGateway.telemetryEnabled = true
         }
     }

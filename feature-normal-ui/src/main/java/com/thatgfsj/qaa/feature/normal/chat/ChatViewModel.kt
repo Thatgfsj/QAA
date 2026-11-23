@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.thatgfsj.qaa.feature.normal.model.ChatMessage
 import com.thatgfsj.qaa.feature.normal.model.ChatRole
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,18 +67,37 @@ class ChatViewModel(
                     }
                 }
             } else {
+                // 真实运行链：生成期间把同源 token 片段追加到占位消息，边生成边渲染。
+                val streamJob: Job? = port.assistantTokens?.let { tokens ->
+                    viewModelScope.launch {
+                        tokens.collect { token -> appendAssistantToken(replyId, token) }
+                    }
+                }
                 val reply = try {
                     port.ask(trimmed)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     "本轮执行失败：" + (error.message ?: error::class.simpleName)
+                } finally {
+                    streamJob?.cancel()
                 }
+                // 端口返回值为权威终稿：覆盖流式预览（可含工具调用片段或格式差异）。
                 _messages.update { list ->
-                    list.map { msg -> if (msg.id == replyId) msg.copy(content = reply) else msg }
+                    list.map { msg ->
+                        if (msg.id == replyId) msg.copy(content = reply.ifEmpty { msg.content }) else msg
+                    }
                 }
             }
             _isGenerating.value = false
+        }
+    }
+
+    /** 追加流式片段到指定助手消息；生成已结束或片段空时忽略（迟到片段防护）。 */
+    private fun appendAssistantToken(replyId: Long, token: String) {
+        if (token.isEmpty() || !_isGenerating.value) return
+        _messages.update { list ->
+            list.map { msg -> if (msg.id == replyId) msg.copy(content = msg.content + token) else msg }
         }
     }
 

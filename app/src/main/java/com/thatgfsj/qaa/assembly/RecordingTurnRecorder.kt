@@ -36,6 +36,7 @@ class RecordingTurnRecorder(
     private val delegate: JsonlTurnRecorder,
     private val compactedView: () -> CompactedView,
     private val parser: ToolCallParser = ToolCallParser(),
+    private val tokenRelay: AssistantTokenRelay? = null,
 ) : TurnRecorder {
 
     private val _events = MutableSharedFlow<AgentEvent>(
@@ -50,6 +51,7 @@ class RecordingTurnRecorder(
 
     fun beginTurn() {
         turnText.setLength(0)
+        tokenRelay?.beginTurn()
         delegate.beginTurn()
     }
 
@@ -74,9 +76,12 @@ class RecordingTurnRecorder(
     ) {
         delegate.appendAssistant(text, toolCalls, parseRetries, metrics, stepIndex)
         val visible = visibleAssistantText(text, parser)
+        // 生成步收口：已逐 token 上屏的步由 UI 行定稿，不再整段重放；工具调用 JSON 的步
+        // 以空文本丢弃该临时行，保持「调用 JSON 不进对话区」的既有语义。
+        val streamed = tokenRelay?.finishStep(visible) ?: false
         if (visible.isNotEmpty()) {
             turnText.append(visible).append('\n')
-            _events.tryEmit(AgentEvent(AgentEventKind.ASSISTANT, visible))
+            if (!streamed) _events.tryEmit(AgentEvent(AgentEventKind.ASSISTANT, visible))
         }
     }
 
