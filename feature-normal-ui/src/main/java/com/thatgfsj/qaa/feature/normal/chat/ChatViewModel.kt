@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.thatgfsj.qaa.feature.normal.model.ChatMessage
 import com.thatgfsj.qaa.feature.normal.model.ChatRole
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,24 +35,46 @@ class ChatViewModel(
 
     private var nextId = 0L
 
+    /** 真实 Agent 端口（:app 注入）；null 时保持模块内 fake 流式回复。 */
+    private var agent: NormalAgentPort? = null
+
+    /** 装配层注入真实运行链（null 复位为骨架 fake）。 */
+    fun bindAgent(port: NormalAgentPort?) {
+        agent = port
+    }
+
     /**
-     * 发送一条用户消息并触发 fake 流式回复（脚本化延迟逐 token 推送）。
-     * 生成中或空白输入将被忽略。
+     * 发送一条用户消息：注入真实端口时走 Agent 轮次（确认门在运行中自然挂起），
+     * 否则用脚本化延迟逐 token 推送 fake 回复。生成中或空白输入将被忽略。
      */
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _isGenerating.value) return
         _messages.update { it + ChatMessage(nextId++, ChatRole.USER, trimmed) }
         _isGenerating.value = true
+        val replyId = nextId++
+        _messages.update { it + ChatMessage(replyId, ChatRole.ASSISTANT, "") }
+        val port = agent
         viewModelScope.launch {
-            val replyId = nextId++
-            _messages.update { it + ChatMessage(replyId, ChatRole.ASSISTANT, "") }
-            scriptedReplyTokens(trimmed).forEach { token ->
-                delay(tokenIntervalMs)
-                _messages.update { list ->
-                    list.map { msg ->
-                        if (msg.id == replyId) msg.copy(content = msg.content + token) else msg
+            if (port == null) {
+                scriptedReplyTokens(trimmed).forEach { token ->
+                    delay(tokenIntervalMs)
+                    _messages.update { list ->
+                        list.map { msg ->
+                            if (msg.id == replyId) msg.copy(content = msg.content + token) else msg
+                        }
                     }
+                }
+            } else {
+                val reply = try {
+                    port.ask(trimmed)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    "本轮执行失败：" + (error.message ?: error::class.simpleName)
+                }
+                _messages.update { list ->
+                    list.map { msg -> if (msg.id == replyId) msg.copy(content = reply) else msg }
                 }
             }
             _isGenerating.value = false
