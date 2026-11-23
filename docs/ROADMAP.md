@@ -2,6 +2,12 @@
 
 > 议题即验收：每个 Phase 的 In-Scope 项均对应仓库 Issue，完成以 Issue 闭环为准。
 
+> **2026-11-24 用户指令调整**：
+> 1. 仓库转公开，许可证由 Apache-2.0 变更为 GPL-3.0-or-later。
+> 2. **真机验收（#22）与端侧画图（#23 / #24）暂缓实施**，待用户明确指令后重启；其余议题照常推进。
+> 3. Phase 2 的 Agent 工具闭环在暂缓期内先以模拟器 + 冒烟模型跑通逻辑链路；3B/4B 模型的 Tool Calling 质量验收随 #22 真机重启后执行。
+> 4. 仓库合并与日常管理授权 Lead 自主执行。
+
 ## Phase 1 · 工程骨架、双前端路由与 GenieX 冒烟
 
 - [ ] Android Kotlin 工程骨架：六模块、minSdk 27、arm64-v8a、Compose、版本目录
@@ -25,11 +31,11 @@
 - [ ] App 私有目录 + SAF 外部授权目录（storage grant）的 read / write / edit 工具
 - [ ] model pull 断点续传 + model import SAF 旁加载
 - [ ] 核心模块单元测试套件（JVM 可跑）
-- [ ] ADB 骁龙真机：3B/4B Q4_0 实测 NPU 推理速度 + 完整 Agent 工具闭环
+- [ ] ~~ADB 骁龙真机：3B/4B Q4_0 实测 NPU 推理速度 + 完整 Agent 工具闭环~~（**暂缓**，#22）
 
-**验收**：真机 NPU 实测（TTFT、tok/s、内存峰值）记录入 docs/benchmarks/；Agent 全流程（skills 命中 → read → 确认 → write → fork → compact → steer）可回溯。
+**验收**：Agent 全流程（skills 命中 → read → 确认 → write → fork → compact → steer）在模拟器 + 冒烟链路上逻辑可回溯；真机 NPU 实测（TTFT、tok/s、内存峰值）暂缓至 #22 重启后记录入 docs/benchmarks/。
 
-## Phase 3 · 端侧画图与内存互斥调度（人工门禁）
+## Phase 3 · 端侧画图与内存互斥调度（人工门禁 · **已暂缓**）
 
 - [ ] ImageGenEngine 底座选型决策（**需用户拍板后实施**）
 - [ ] 接入 draw_image 工具
