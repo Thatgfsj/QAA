@@ -32,6 +32,12 @@ dependencies {
     implementation(project(":core-harness"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
+
+    // 状态逻辑单测（Issue #9 验收）：纯 JVM 跑，不依赖 Android 模拟器。
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
