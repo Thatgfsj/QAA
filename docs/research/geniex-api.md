@@ -1,7 +1,7 @@
 # GenieX Android SDK API 调研报告（com.qualcomm.qti:geniex-android:0.10.0）
 
 > **用途**：为 QAA `core-inference`（LlmEngine / BackendFallbackManager / InferenceMetrics / 模型下载器）与 `model pull` 命令提供 GenieX Android SDK 的接口事实依据。
-> **调研人**：geniex-researcher（共享任务 task-1）｜分支 `docs/geniex-research`｜日期 2026-11-24
+> **日期**：2026-11-24
 > **结论可信度**：所有事实均标注来源；与 QAA 架构假设冲突处单独点名；无法离线确证项集中列于 §13 待验证清单。
 
 ## 0. 调研方法与来源分级
@@ -163,7 +163,7 @@ hybrid→ device_id 置空 + ngl=-1：llama.cpp 逐张量 HTP+CPU 调度（官�
 
 - GenieX **没有文档化的"失败自动逐级回退"链**：`qairt` 的 cpu/gpu 请求会被强转 npu；`llama_cpp` 的"回退"本质是 ①加载期按精度选落点（§3.3），②hybrid 模式下逐张量把不支持的算子留在 CPU。
 - 因此 QAA 的 `BackendFallbackManager` 需要**自实现 create 级降级链**：按 §12 建议顺序尝试 `create`，`Result.failure` 即换下一档。
-- **语义冲突点名**：QAA `ComputeBackend.HYBRID` 注释为"Adreno GPU"，而 GenieX 的 `hybrid` = HTP+CPU 逐张量（GPU 是独立的 `gpu` 别名）。建议 Lead 决策：要么把 QAA 的 HYBRID 析构改名为 GPU 并映射 `"gpu"`，要么把 QAA 的 AUTO 映射 `"hybrid"`（性能快速路径）、NPU 映射 `"npu"`。
+- **语义冲突与定夺（2026-11-24）**：QAA `ComputeBackend.HYBRID` 早期注释为"Adreno GPU"，与 GenieX `hybrid`（HTP+CPU 逐张量）语义冲突。定夺：QAA HYBRID 直接映射 GenieX `"hybrid"`（官方 LLM 快速路径），架构注释同步修正；Adreno `"gpu"` 仅作为降级链内 HYBRID 失败后的附加尝试档，不暴露为命令选项（详见 ARCHITECTURE.md 第 4.1 节）。
 
 ---
 
@@ -423,9 +423,9 @@ GenieXSdk.getInstance().setQairtRuntimePath(path)  // 必须在 init 之前调�
 | --- | --- | --- |
 | `AUTO` | `null`（=npu/HTP0）**或显式 `"hybrid"`（NPU+CPU 逐张量，官方称 LLM 快速路径）** | §3.1；hybrid 需显式传值，null 默认是 npu 不是 hybrid |
 | `NPU` | `"npu"`（HTP0 固定） | §3.1 |
-| `HYBRID`（QAA 注释=Adreno GPU） | `"gpu"`——**语义冲突点名：GenieX 的 hybrid ≠ GPU**，Lead 需定夺改名或改映射 | §3.5 |
+| `HYBRID` | `"hybrid"`——**已定夺（2026-11-24）**：映射 GenieX hybrid（HTP+CPU 官方快速路径），架构注释同步修正；Adreno `"gpu"` 仅作降级链内附加尝试档 | §3.5 |
 | `CPU` | `"cpu"`（ngl 强制 0） | §3.1 |
-| 降级链实现 | `BackendFallbackManager` 自管：create 级按 NPU→(GPU|HYBRID)→CPU 顺序重试 `Result.failure`；GenieX 无自动链 | §3.5/§9.3 |
+| 降级链实现 | `BackendFallbackManager` 自管：create 级按 NPU→HYBRID→GPU（附加尝试）→CPU 顺序重试 `Result.failure`；GenieX 无自动链 | §3.5/§9.3 |
 | 后端状态流 | 锁定值（应用层）+ logcat `GenieXSdk` 解析（观测）+ `ProfilingData` 速度（推断）三源合一 | §3.4 |
 
 ### 12.2 冒烟模型接入（Supra2.5-Pro-Instruct Q4_0 GGUF，~40MB）
