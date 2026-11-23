@@ -200,18 +200,29 @@ interface ToolContext {
     val limits: ToolLimits      // 输出截断预算（read 8000 字符、write 64KB 等）
 }
 
+sealed class SandboxRoot {
+    abstract val id: String
+    data class File(override val id: String, val directory: Path) : SandboxRoot()
+    data class Saf(override val id: String, val treeUri: String,
+                   val displayName: String, val gateway: SafDocumentGateway) : SandboxRoot()
+}
+
 interface SandboxFs {
     suspend fun resolve(path: String): ResolvedPath     // 越界→E_PATH_ESCAPE
     suspend fun exists(path: String): Boolean
     suspend fun readText(path: String, maxChars: Int): String
-    suspend fun writeText(path: String, content: String)          // 临时文件+原子重命名
+    suspend fun writeText(path: String, content: String)          // File：临时文件+原子重命名；SAF：覆盖流
     suspend fun applyEdit(path: String, oldText: String,
                           newText: String, replaceAll: Boolean): EditOutcome
 }
 ```
 
-- 授权根：App 私有目录 + SAF storage grant 目录（ROADMAP Phase 2）；Android 实现在 app 层
-  注入，:core-tools 只依赖接口 → JVM 单测用临时目录/内存实现。
+- 授权根为组合根：File 根（App 私有目录）走 NIO 并保留符号链接逃逸校验；SAF 根
+  （storage grant，ROADMAP Phase 2）只携带树 Uri + `SafDocumentGateway`，全部文件操作经
+  DocumentsContract / ContentResolver 语义逐段解析 DocumentId，**不映射 /storage 真实路径**
+  （targetSdk 35 分区存储下不可直访）。Android 网关实现位于 app 层，:core-tools 只依赖接口
+  → JVM 单测用临时目录/内存网关。SAF 根的写入为 openOutputStream 覆盖（无原子替换），
+  授权边界由树本身限定，无符号链接逃逸面；'..' 仍在词法层拒绝。
 - :core-tools 禁止直接持有 GenieX 对象（上游第 2 节）；draw_image 只经 ImageGenEngine 抽象。
 
 ### 3.3 四工具参数 schema

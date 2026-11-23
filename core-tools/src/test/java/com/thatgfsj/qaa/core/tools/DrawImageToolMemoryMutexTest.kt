@@ -23,7 +23,7 @@ class DrawImageToolMemoryMutexTest {
 
     private class Harness(tmp: TemporaryFolder) {
         val root = tmp.newFolder()
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", root.toPath())))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", root.toPath())))
         val llm = FakeLlmHandle()
         val engine = FakeImageGenEngine()
         val imageHandle = ImageGenEngineMemoryHandle(engine)
@@ -46,7 +46,7 @@ class DrawImageToolMemoryMutexTest {
     @Test
     fun engineAndCoordinatorMissingFailsFast() = runBlocking {
         val root = tmp.newFolder("bare")
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", root.toPath())))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", root.toPath())))
         val result = DrawImageTool().execute(
             """{"prompt":"一只猫"}""",
             TestToolContext(sandbox = sandbox),
@@ -58,7 +58,7 @@ class DrawImageToolMemoryMutexTest {
     @Test
     fun engineWithoutCoordinatorFailsFast() = runBlocking {
         val root = tmp.newFolder("engine-only")
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", root.toPath())))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", root.toPath())))
         val engine = FakeImageGenEngine()
         val result = DrawImageTool(engine).execute(
             """{"prompt":"一只猫"}""",

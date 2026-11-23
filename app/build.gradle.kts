@@ -66,8 +66,6 @@ dependencies {
 
     // ui_mode 持久化（Issue #7）：DataStore preferences + 生命周期组件
     implementation(libs.androidx.datastore.preferences)
-    // SAF 目录授权：DocumentFile 校验所选目录是否为可读目录
-    implementation(libs.androidx.documentfile)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     // Terminal 三段式视图的 ViewModel 装配（Issue #10 命令接线）。

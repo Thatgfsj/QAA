@@ -14,5 +14,5 @@ class TestToolContext(
 /** 在 TemporaryFolder 下建一个单授权根（id = "main"）的沙盒。 */
 fun tempSandbox(tmp: TemporaryFolder, rootName: String = "root"): Pair<LocalSandboxFs, File> {
     val root = tmp.newFolder(rootName)
-    return LocalSandboxFs(listOf(SandboxRoot("main", root.toPath()))) to root
+    return LocalSandboxFs(listOf(SandboxRoot.File("main", root.toPath()))) to root
 }
