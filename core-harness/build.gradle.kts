@@ -7,7 +7,9 @@ kotlin {
 }
 
 dependencies {
-    // 硬约束（Issue #3）：纯 Kotlin 库，严禁 Android 框架依赖，保证可 JVM 单测。
+    // 纯 Kotlin 库（Issue #3）：不依赖 Android 框架，保证可 JVM 单测。
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
