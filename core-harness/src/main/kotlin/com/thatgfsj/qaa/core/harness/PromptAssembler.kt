@@ -57,11 +57,18 @@ class PromptAssembler(
         const val DEMOTION_NOTICE =
             "工具调用解析多次失败，请不要再尝试调用工具，直接用文字回答用户。"
 
-        /** 解析失败后的纠错提示（附原输出片段与模板，设计文档 4.3）。 */
-        fun correctionNotice(rawOutput: String): String =
-            "上一条回复不是合法的工具调用 JSON（原文开头片段：" + rawOutput.take(60) +
-                "）。若需要使用工具，只输出一个 JSON 对象：" +
+        /**
+         * 解析失败后的纠错提示（设计文档 4.3/4.4）：附失败原因、四工具白名单、
+         * JSON 模板与原文片段，让模型知道错在哪、可用什么、该怎么改。
+         */
+        fun correctionNotice(rawOutput: String, reason: String? = null): String {
+            val cause = if (reason.isNullOrBlank()) "" else "原因：$reason。"
+            val whitelist = ToolCallParser.TOOL_WHITELIST.joinToString(" / ")
+            return "上一条回复不是合法的工具调用 JSON。$cause" +
+                "可用工具仅限：$whitelist。" +
+                "若需要使用工具，只输出一个 JSON 对象：" +
                 "{\"tool\": \"工具名\", \"args\": { ... }}" +
-                "；否则直接用中文回答。"
+                "；否则直接用中文回答。原文开头片段：" + rawOutput.take(60)
+        }
     }
 }

@@ -72,8 +72,9 @@ class AgentLoop(
                         notice = PromptAssembler.DEMOTION_NOTICE
                         toolsDisabled = true
                     } else {
+                        // 设计文档 4.3/4.4：回注原因、白名单、模板与原文片段，供模型自纠。
                         recorder.appendSystemNotice(
-                            PromptAssembler.correctionNotice(output.text)
+                            PromptAssembler.correctionNotice(output.text, parsed.reason)
                         )
                     }
                 }
@@ -88,6 +89,9 @@ class AgentLoop(
                         stepIndex = step,
                     )
                     for (call in parsed.calls) {
+                        // 设计文档 1.2/4.2：数组展开后逐调用检查硬顶，一次响应携带多个
+                        // 调用也不得突破 maxToolSteps；超出预算的调用不执行、不落 tool 节点。
+                        if (step >= config.maxToolSteps) break
                         val stepIndex = step
                         val outcome = executeWithConfirmation(call, stepIndex)
                         recorder.appendTool(call, outcome, stepIndex)
