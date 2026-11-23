@@ -23,7 +23,7 @@ sealed interface ParseOutcome {
  * 1. 代码围栏剥离：```json 与裸围栏一视同仁；多围栏取第一个含工具键的；
  * 2. 首花括号定位：容忍前置闲聊，从首个 `{` 起截取；顶层数组 `[` 同样纳入；
  * 3. 括号配平扫描：按栈扫描，字符串字面量与转义引号不参与配平；
- * 4. 截断修补：仅在截断点明确时按栈补全，最多补齐 3 个闭合记号；
+ * 4. 截断修补：深度未归零时按栈补全缺失的引号/括号，最多 3 个闭合记号；
  * 5. 字段校验：tool ∈ 四工具白名单、args 为对象（缺省视作空对象）。
  *
  * 数组容忍：顶层数组按序展开为多个调用（设计 4.2）；别名容忍：tool/args
@@ -164,15 +164,13 @@ class ToolCallParser {
     }
 
     /**
-     * 按栈补全被截断的 JSON。截断点停在完整值/容器的右边界时不补全：这种片段
-     * 既可能是流被截断，也可能是模型刻意给出的前缀，凭猜测补括号会改变语义并可能
-     * 执行参数不完整的变更类调用，交由纠错重试更稳妥。
+     * 按栈补全被截断的 JSON（设计 4.2 第 4 级）：深度未归零即补，不附加截断点位置
+     * 条件——停在完整值之后只缺闭合括号，正是模型被 token 预算截断时最常见的形态。
+     * 一次最多补 [MAX_REPAIR_MARKS] 个记号；若补完仍无法解析（如停在逗号处），
+     * 由 [parseCandidate] 转 Invalid 交纠错重试。
      */
     private fun repair(fragment: String, scan: Scan): Repair {
         val trimmed = if (scan.inString) fragment else fragment.trimEnd()
-        val last = trimmed.lastOrNull()
-        val atValueBoundary = !scan.inString && (last == '"' || last == '}' || last == ']')
-        if (atValueBoundary) return Repair.Failed("JSON 截断且未停在可补全的位置")
         if (scan.trailingEscape) return Repair.Failed("JSON 截断在转义符之后，无法补全")
         val suffix = buildString {
             if (scan.inString) append('"')

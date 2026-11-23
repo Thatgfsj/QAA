@@ -80,6 +80,22 @@ class ToolCallParserTest {
     }
 
     @Test
+    fun P4_完整值后缺闭合括号_仍按栈修补() {
+        // 设计 4.2 第 4 级只要求"深度未归零"，停在完整字符串值之后同样是修补路径。
+        val truncated = "{\"tool\":\"read\",\"args\":{\"path\":\"a.txt\""
+        val call = calls(truncated).single()
+        assertEquals("read", call.tool)
+        assertEquals("""{"path":"a.txt"}""", call.argsJson)
+    }
+
+    @Test
+    fun P4_修补后仍非法_判定失败() {
+        // 停在逗号处：补齐两个花括号后仍是 {"path":"a.txt",}}，解析失败交纠错重试。
+        val trailingComma = "{\"tool\":\"read\",\"args\":{\"path\":\"a.txt\","
+        assertTrue(reason(trailingComma).contains("补全后仍无法解析"))
+    }
+
+    @Test
     fun P4_截断超深_判定失败() {
         // 4 层未闭合花括号 + 1 个未闭合字符串 = 需补 5 个记号，超过 3 个上限。
         val deep = "{\"tool\":\"write\",\"args\":{\"opts\":{\"a\":{\"b\":\"x"

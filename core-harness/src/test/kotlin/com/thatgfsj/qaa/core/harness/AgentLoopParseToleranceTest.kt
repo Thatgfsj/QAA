@@ -8,7 +8,8 @@ import org.junit.Test
 /**
  * AgentLoop 与 ToolCallParser 的集成单测（Issue #13）：
  * 围栏/截断 JSON 不再被当终答静默丢弃、数组多调用逐调用检查步数预算、
- * 未知工具原因与四工具白名单回注纠错话术、超深截断走重试降级。
+ * 未知工具原因与四工具白名单回注纠错话术、超深截断/括号错配走重试降级、
+ * 完整值后缺闭合括号仍被修补救回。
  */
 class AgentLoopParseToleranceTest {
 
@@ -116,5 +117,19 @@ class AgentLoopParseToleranceTest {
             PromptAssembler.DEMOTION_NOTICE,
             engine.receivedMessages.last().last().content,
         )
+    }
+
+    @Test
+    fun T6_完整值后缺括号_修补救回并继续执行() = runTest {
+        // 设计 4.2 第 4 级只要求深度未归零：缺 2 个花括号、补完即合法，应直接救回。
+        val truncated = "{\"tool\":\"read\",\"args\":{\"path\":\"a.txt\""
+        val engine = FakeLlmEngine(listOf(truncated, "读取完成。"))
+        val tools = FakeToolGateway()
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, recorder = recorder).runTurn("读 a.txt")
+
+        assertEquals(listOf("read"), tools.executed.map { it.call.tool })
+        assertEquals(2, engine.receivedMessages.size)
+        assertTrue(recorder.nodes.none { "correction" in it.tags })
     }
 }

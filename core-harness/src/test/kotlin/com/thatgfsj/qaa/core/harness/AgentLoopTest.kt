@@ -120,7 +120,8 @@ class AgentLoopTest {
 
     @Test
     fun L8_解析降级_重试耗尽后禁用工具() = runTest {
-        val dirtyJson = """{"tool": "read", "args": {"path": "a.txt"""" // 截断脏 JSON
+        // 4 层未闭合花括号 + 1 个未闭合字符串 = 需补 5 个记号，超出 3 个修补上限。
+        val dirtyJson = "{\"tool\":\"read\",\"args\":{\"opts\":{\"a\":{\"b\":\"x"
         val engine = FakeLlmEngine(
             listOf(dirtyJson, dirtyJson, dirtyJson, "好的，我直接用文字回答。")
         )
@@ -203,7 +204,8 @@ class AgentLoopTest {
 
     @Test
     fun S1_解析失败按连续计数_合法调用后重置() = runTest {
-        val dirtyJson = """{"tool": "read", "args": {"path": "a.txt"""" // 截断脏 JSON
+        // 括号错配（{ 被 ] 关闭）不可修补，同样走解析失败连续计数。
+        val dirtyJson = "{\"tool\":\"read\",\"args\":{\"path\":\"a.txt\"]}"
         val engine = FakeLlmEngine(
             listOf(dirtyJson, dirtyJson, readJson, dirtyJson, "直接回答。")
         )
