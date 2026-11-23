@@ -67,11 +67,17 @@ class DrawImageTool(
                 elapsedMs(start),
             )
         }
+        val enginePath = resolved.absolutePath
+            ?: return ToolResult.failure(
+                ToolErrorCode.IO,
+                "draw_image 输出路径需位于文件系统根内（SAF 授权根不支持画图落盘）",
+                elapsedMs(start),
+            )
         val outcome = try {
             coordinator.requestImageGenCycle(
                 prompt = prompt,
                 outputPath = outputPath,
-                enginePath = resolved.absolutePath.toString(),
+                enginePath = enginePath.toString(),
             )
         } catch (e: IllegalTransitionException) {
             return ToolResult.failure(

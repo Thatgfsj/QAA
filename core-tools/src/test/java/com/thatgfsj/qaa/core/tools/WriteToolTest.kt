@@ -99,7 +99,7 @@ class WriteToolTest {
 
     /** 注入半写失败：armed 后写一半字节再抛 IO 异常。 */
     private class HalfWriteFailingSandbox(rootDir: Path) :
-        LocalSandboxFs(listOf(SandboxRoot("main", rootDir))) {
+        LocalSandboxFs(listOf(SandboxRoot.File("main", rootDir))) {
 
         var injectFailure = false
         var injected = false

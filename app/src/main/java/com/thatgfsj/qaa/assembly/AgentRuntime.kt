@@ -78,7 +78,7 @@ import kotlinx.coroutines.withContext
  * 端口适配（依赖倒置，组件本体零改动）：
  * - [LlmGatewayAdapter]：GenieX 流 → HarnessPorts.LlmEngineGateway + 统计栏指标；
  * - [ToolRouterGateway]：四原语工具经 [LocalSandboxFs] 执行，filesDir 为默认授权根，
- *   外部目录经 storage grant 动态挂载；
+ *   外部目录经 storage grant 以 SAF 根动态挂载（不映射真实路径）；
  * - [RecordingTurnRecorder]：树状 JSONL 落盘 + 压缩视图作为提示历史；
  * - [SteerQueue] 同时接 Loop 的工具步边界与确认挂起竞速（L7），由 [SteerTurnDriver] 驱动轮次；
  * - [ContextCompactor] 在工具步边界与轮末两个安全点自动检查，/compact 走手动入口；
@@ -108,7 +108,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val releaser = AssetModelReleaser(AndroidAssetSource(appContext), modelsDir)
     private val catalog = ModelCatalog(modelsDir, DefaultGenieXModelGateway)
     private val pullClient = ModelPullClient()
-    private val sandbox = LocalSandboxFs(listOf(SandboxRoot(SANDBOX_ROOT_ID, filesDir.toPath())))
+    private val sandbox = LocalSandboxFs(listOf(SandboxRoot.File(SANDBOX_ROOT_ID, filesDir.toPath())))
     private val storageGrant = StorageGrant(appContext, sandbox)
     private val modelImport = ModelImportCoordinator(modelsDir, catalog)
 

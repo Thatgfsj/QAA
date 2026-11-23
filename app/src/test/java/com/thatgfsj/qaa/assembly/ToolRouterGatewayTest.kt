@@ -20,7 +20,7 @@ class ToolRouterGatewayTest {
     val folder = TemporaryFolder()
 
     private fun gateway(): ToolRouterGateway {
-        val root = SandboxRoot("files", folder.newFolder("files").toPath())
+        val root = SandboxRoot.File("files", folder.newFolder("files").toPath())
         return ToolRouterGateway(
             sandbox = LocalSandboxFs(listOf(root)),
             sessionId = "test-session",

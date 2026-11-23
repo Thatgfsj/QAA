@@ -23,7 +23,7 @@ class SandboxFsTest {
         val (sandbox, _) = tempSandbox(tmp)
         val resolved = sandbox.resolve("a/./b.txt")
         assertEquals("a/b.txt", resolved.relativePath)
-        assertTrue(resolved.absolutePath.startsWith(resolved.root.directory))
+        assertTrue(resolved.absolutePath!!.startsWith((resolved.root as SandboxRoot.File).directory))
     }
 
     @Test
@@ -38,7 +38,7 @@ class SandboxFsTest {
         val (sandbox, root) = tempSandbox(tmp)
         val resolved = sandbox.resolve(".")
         assertEquals("", resolved.relativePath)
-        assertEquals(root.toPath().toRealPath(), resolved.absolutePath.toRealPath())
+        assertEquals(root.toPath().toRealPath(), resolved.absolutePath!!.toRealPath())
     }
 
     @Test
@@ -126,12 +126,12 @@ class SandboxFsTest {
         val main = tmp.newFolder("main")
         val ext = tmp.newFolder("ext")
         val sandbox = LocalSandboxFs(
-            listOf(SandboxRoot("main", main.toPath()), SandboxRoot("ext", ext.toPath()))
+            listOf(SandboxRoot.File("main", main.toPath()), SandboxRoot.File("ext", ext.toPath()))
         )
-        assertEquals(main.toPath().toRealPath(), sandbox.resolve("main/f.txt").absolutePath.parent.toRealPath())
-        assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext/g.txt").absolutePath.parent.toRealPath())
-        assertEquals(main.toPath().toRealPath(), sandbox.resolve("f.txt").absolutePath.parent.toRealPath())
-        assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext").absolutePath.toRealPath())
+        assertEquals(main.toPath().toRealPath(), sandbox.resolve("main/f.txt").absolutePath!!.parent.toRealPath())
+        assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext/g.txt").absolutePath!!.parent.toRealPath())
+        assertEquals(main.toPath().toRealPath(), sandbox.resolve("f.txt").absolutePath!!.parent.toRealPath())
+        assertEquals(ext.toPath().toRealPath(), sandbox.resolve("ext").absolutePath!!.toRealPath())
     }
 
     @Test
@@ -139,27 +139,27 @@ class SandboxFsTest {
         val main = tmp.newFolder("main")
         val first = tmp.newFolder("ext-first")
         val second = tmp.newFolder("ext-second")
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", main.toPath())))
 
-        assertNull(sandbox.addRoot(SandboxRoot("ext", first.toPath())))
+        assertNull(sandbox.addRoot(SandboxRoot.File("ext", first.toPath())))
         sandbox.writeText("ext/a.txt", "外部")
         assertEquals("外部", sandbox.readText("ext/a.txt", 10))
         assertEquals(
             first.toPath().toRealPath(),
-            sandbox.resolve("ext/a.txt").absolutePath.parent.toRealPath(),
+            sandbox.resolve("ext/a.txt").absolutePath!!.parent.toRealPath(),
         )
 
-        val replaced = sandbox.addRoot(SandboxRoot("ext", second.toPath()))
-        assertEquals(first.toPath().toRealPath(), replaced!!.directory.toRealPath())
+        val replaced = sandbox.addRoot(SandboxRoot.File("ext", second.toPath()))
+        assertEquals(first.toPath().toRealPath(), (replaced as SandboxRoot.File).directory.toRealPath())
         assertFalse(sandbox.exists("ext/a.txt"))
         sandbox.writeText("ext/b.txt", "新根")
         assertEquals(
             second.toPath().toRealPath(),
-            sandbox.resolve("ext/b.txt").absolutePath.parent.toRealPath(),
+            sandbox.resolve("ext/b.txt").absolutePath!!.parent.toRealPath(),
         )
         assertEquals(
             main.toPath().toRealPath(),
-            sandbox.resolve("a.txt").absolutePath.parent.toRealPath(),
+            sandbox.resolve("a.txt").absolutePath!!.parent.toRealPath(),
         )
     }
 
@@ -167,8 +167,8 @@ class SandboxFsTest {
     fun addRootKeepsEscapeGuardsThroughMountedRoot() {
         val main = tmp.newFolder("main")
         val ext = tmp.newFolder("ext")
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
-        sandbox.addRoot(SandboxRoot("ext", ext.toPath()))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", main.toPath())))
+        sandbox.addRoot(SandboxRoot.File("ext", ext.toPath()))
         try {
             runBlocking { sandbox.resolve("ext/../escape.txt") }
             fail("授权根内的 '..' 应当被拒绝")
@@ -188,14 +188,14 @@ class SandboxFsTest {
     fun addRootRejectsDefaultRootReplacementAndMissingDirectory() {
         val main = tmp.newFolder("main")
         val other = tmp.newFolder("other")
-        val sandbox = LocalSandboxFs(listOf(SandboxRoot("main", main.toPath())))
+        val sandbox = LocalSandboxFs(listOf(SandboxRoot.File("main", main.toPath())))
         try {
-            sandbox.addRoot(SandboxRoot("main", other.toPath()))
+            sandbox.addRoot(SandboxRoot.File("main", other.toPath()))
             fail("默认授权根不可替换")
         } catch (_: IllegalArgumentException) {
         }
         try {
-            sandbox.addRoot(SandboxRoot("ext", File(main, "missing").toPath()))
+            sandbox.addRoot(SandboxRoot.File("ext", File(main, "missing").toPath()))
             fail("不存在的授权根应当被拒绝")
         } catch (_: IllegalArgumentException) {
         }
@@ -228,7 +228,7 @@ class SandboxFsTest {
     fun duplicateRootIdsRejected() {
         val a = tmp.newFolder("a")
         try {
-            LocalSandboxFs(listOf(SandboxRoot("same", a.toPath()), SandboxRoot("same", a.toPath())))
+            LocalSandboxFs(listOf(SandboxRoot.File("same", a.toPath()), SandboxRoot.File("same", a.toPath())))
             fail("重复根 id 应当被拒绝")
         } catch (_: IllegalArgumentException) {
         }

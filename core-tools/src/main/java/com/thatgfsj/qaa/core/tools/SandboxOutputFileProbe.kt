@@ -13,6 +13,7 @@ class SandboxOutputFileProbe(private val sandbox: SandboxFs) : OutputFileProbe {
 
     override suspend fun inspect(sandboxPath: String): OutputFileCheck = try {
         val path = sandbox.resolve(sandboxPath).absolutePath
+            ?: return OutputFileCheck.Invalid("输出路径不在文件系统授权根内: " + sandboxPath)
         when {
             !Files.exists(path) -> OutputFileCheck.Invalid("输出文件不存在: " + sandboxPath)
             !Files.isRegularFile(path) -> OutputFileCheck.Invalid("输出路径不是普通文件: " + sandboxPath)
