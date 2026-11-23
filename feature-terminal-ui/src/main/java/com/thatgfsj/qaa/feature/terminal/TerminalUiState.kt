@@ -7,10 +7,14 @@ package com.thatgfsj.qaa.feature.terminal
  * 唯一持有者为 [TerminalViewModel]，对外以 StateFlow 暴露。
  */
 
-/** 流式对话角色：严格对应「你 &lt; 」与「AI &lt; 」前缀契约。 */
+/**
+ * 流式对话角色：「你 &lt; 」「AI &lt; 」对应对话契约；
+ * [SYSTEM] 为 Shell 命令输出（help 表格 / 中文提示），无前缀、单独成行。
+ */
 enum class TerminalRole(val displayPrefix: String) {
     USER("你 < "),
     AI("AI < "),
+    SYSTEM(""),
 }
 
 /** 会话模式：顶部常驻栏 [CHAT] / [AGENT] 标签来源（切换由命令层 Issue #10 驱动）。 */

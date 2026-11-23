@@ -58,6 +58,23 @@ class TerminalViewModel internal constructor(
     }
 
     /**
+     * Shell 命令输出回显（命令层接线点）：整段写成一条 SYSTEM 行，不与相邻行合并，
+     * 便于 help 表格、错误提示与模型清单保持原样排版。
+     */
+    fun appendOutput(text: String) {
+        val body = text.trimEnd()
+        if (body.isEmpty()) return
+        val id = nextEntryId
+        nextEntryId += 1
+        updateState { state ->
+            state.copy(
+                entries = state.entries + TerminalEntry(id, TerminalRole.SYSTEM, body),
+                followOutput = true,
+            )
+        }
+    }
+
+    /**
      * AI 流式片段回填（Issue #5 流式回调接线点）。
      *
      * 流式文本缓冲规则：末行为 AI 时合并续写，否则新起一行

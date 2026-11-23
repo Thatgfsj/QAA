@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun TerminalScreen(
     viewModel: TerminalViewModel = viewModel(),
+    onSubmit: (String) -> Unit = viewModel::onUserInput,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -38,7 +39,7 @@ fun TerminalScreen(
                 onFollowChanged = viewModel::setFollowOutput,
                 modifier = Modifier.weight(1f),
             )
-            TerminalBottomBar(state = state)
+            TerminalBottomBar(state = state, onSubmit = onSubmit)
         }
     }
 }
