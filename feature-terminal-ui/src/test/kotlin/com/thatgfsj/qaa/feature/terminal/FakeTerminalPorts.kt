@@ -24,6 +24,8 @@ class FakeTerminalAgentPort(
     var compactText = "已压缩上下文：1 段"
     var skillsText = "技能注册表：注册 0 个"
     var statusText = "模型清单：1 项"
+    var newSessionText = "已新建会话：main-2"
+    var newSessionCount = 0
 
     fun setState(next: TerminalAgentState) {
         _state.value = next
@@ -54,6 +56,8 @@ class FakeTerminalAgentPort(
     override suspend fun skills(): String = skillsText
 
     override suspend fun statusExtra(): String = statusText
+
+    override suspend fun newSession(): String = newSessionText.also { newSessionCount += 1 }
 }
 
 /** 模型清单替身（序号与名称沿用 LocalModelEntry）。 */

@@ -33,7 +33,8 @@ data class AgentEvent(val kind: AgentEventKind, val text: String)
  * 工具调用 JSON 不进对话区（由 [ToolCallParser] 判定），只展示纯文字作答与工具结果行。
  */
 class RecordingTurnRecorder(
-    private val delegate: JsonlTurnRecorder,
+    @Volatile
+    private var delegate: JsonlTurnRecorder,
     private val compactedView: () -> CompactedView,
     private val parser: ToolCallParser = ToolCallParser(),
     private val tokenRelay: AssistantTokenRelay? = null,
@@ -56,6 +57,11 @@ class RecordingTurnRecorder(
     }
 
     fun endTurn() = delegate.endTurn()
+
+    /** /new 切换会话后重绑落盘委派；事件流与 token 转发器保持不变。 */
+    fun rebind(next: JsonlTurnRecorder) {
+        delegate = next
+    }
 
     /** 本轮已产生的可见助手文本（工具调用 JSON 已过滤）。 */
     fun turnAssistantText(): String = turnText.toString().trim()

@@ -349,4 +349,21 @@ class TerminalShellControllerTest {
         advanceUntilIdle()
         assertEquals(listOf(BackendRequest.CPU), port.backends)
     }
+
+    @Test
+    fun newCommandClearsConversationAndEchoesNewSessionId() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 1")
+        advanceUntilIdle()
+        viewModel.appendOutput("旧会话内容")
+        shell.onInput("/new")
+        advanceUntilIdle()
+        assertEquals(1, port.newSessionCount)
+        val texts = viewModel.uiState.value.entries.map { it.text }
+        assertFalse(texts.any { it == "旧会话内容" })
+        assertTrue(texts.single().contains(port.newSessionText))
+        assertEquals(ShellStage.SESSION, shell.stage)
+    }
 }

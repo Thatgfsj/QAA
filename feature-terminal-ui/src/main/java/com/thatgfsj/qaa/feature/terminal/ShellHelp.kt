@@ -28,6 +28,7 @@ private val HELP_ROWS = listOf(
     HelpRow("clear", "顶层", "清空当前会话区"),
     HelpRow("/status", "全部", "查看阶段与运行状态"),
     HelpRow("/exit", "会话", "退出会话回顶层态"),
+    HelpRow("/new", "会话", "新建会话（清屏）"),
     HelpRow("/tree", "会话", "查看会话树"),
     HelpRow("/fork [节点ID]", "会话", "以节点为分叉点"),
     HelpRow("/compact", "会话", "压缩上下文"),
@@ -47,6 +48,7 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。")
     appendLine("· chat / agent 支持模型名或从 1 起的序号；输入 model 查看本地模型清单。")
     appendLine("· backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。")
+    appendLine("· /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。")
     append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
 

@@ -112,10 +112,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val storageGrant = StorageGrant(appContext, sandbox)
     private val modelImport = ModelImportCoordinator(modelsDir, catalog)
 
-    private val sessionStore = TreeSessionStore(
+    @Volatile
+    private var sessionStore = TreeSessionStore(
         sessionId = SESSION_ID,
         file = TreeSessionStore.fileFor(sessionsDir, SESSION_ID),
     )
+    private val sessionSwitcher = SessionSwitcher(sessionsDir)
     private val jsonlRecorder = JsonlTurnRecorder(sessionStore)
     private val skills = SkillRegistry.fromDirectory(skillsDir)
     private val compactor = ContextCompactor(engine = llmGateway)
@@ -182,6 +184,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
+    private val backendSwitcher = BackendSwitcher(engine) { _status.value = it }
 
     override val state: StateFlow<TerminalAgentState> = _state.asStateFlow()
 
@@ -244,14 +247,41 @@ class AgentRuntime private constructor(private val appContext: Context) :
         val result = engine.load(path, LlmLoadConfig(backend = backend))
         loadedModelSource = path
         return result.fold(
-            onSuccess = { "模型已载入：${entry.name}（${entry.quantization ?: "未知量化"}）" },
+            onSuccess = {
+                _status.value = READY_TEXT
+                "模型已载入：${entry.name}（${entry.quantization ?: "未知量化"}）"
+            },
             onFailure = { "模型加载失败：${it.message ?: it::class.simpleName}" },
         )
     }
 
     override suspend fun lockBackend(request: BackendRequest): String {
-        backend = request.toComputeBackend()
-        return "已锁定请求后端：${request.displayName}；下次载入模型时生效。"
+        // 重载会中断生成：引擎已加载且轮次进行中时拒绝，避免卸载运行中的会话。
+        if (engine.isLoaded.value && turnMutex.isLocked) {
+            return "轮次进行中：暂不能切换后端，请等本轮结束后重试。"
+        }
+        return when (val result = backendSwitcher.apply(loadedModelSource, backend, request)) {
+            is BackendSwitchResult.Deferred -> {
+                backend = result.next
+                result.message
+            }
+            is BackendSwitchResult.Applied -> {
+                backend = result.next
+                result.message
+            }
+            is BackendSwitchResult.RolledBack -> result.message
+        }
+    }
+
+    override suspend fun newSession(): String {
+        if (turnMutex.isLocked) return "轮次进行中：暂不能新建会话，请等本轮结束后重试。"
+        val previous = sessionStore
+        val store = sessionSwitcher.openNext()
+        recorder.rebind(JsonlTurnRecorder(store))
+        sessionStore = store
+        toolGateway.rebindSession(store.sessionId)
+        previous.close()
+        return "已新建会话：${store.sessionId}（清屏完成；旧会话 ${previous.sessionId} 的记录已保留）。"
     }
 
     override suspend fun tree(): String = sessionStore.renderTree()
@@ -300,8 +330,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
         return buildString {
             appendLine("模型清单：${models.size} 项（序号从 1 起）")
             appendLine(
-                "会话：$SESSION_ID，节点 ${sessionStore.nodeCount()}，" +
-                    "活动分支 ${sessionStore.activeBranch().size} 节点，摘要 $summaryCount 段",
+                sessionStatusText(
+                    sessionId = sessionStore.sessionId,
+                    nodeCount = sessionStore.nodeCount(),
+                    branchNodes = sessionStore.activeBranch().size,
+                    summaries = summaryCount,
+                ),
             )
             append(
                 "上下文：预算 $CONTEXT_BUDGET token，上次 prompt ${llmGateway.lastPromptTokens ?: 0} token；" +
@@ -457,7 +491,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     companion object {
 
-        /** 会话标识（单文件 filesDir/sessions/main.jsonl，重启后延续）。 */
+        /** 基础会话标识（首个会话 filesDir/sessions/main.jsonl；/new 之后为 main-2、main-3…）。 */
         const val SESSION_ID = "main"
         const val MODELS_DIR = "models"
         const val SKILLS_DIR = "skills"
@@ -499,6 +533,14 @@ internal fun BackendRequest.toComputeBackend(): ComputeBackend = when (this) {
     BackendRequest.HYBRID -> ComputeBackend.HYBRID
     BackendRequest.CPU -> ComputeBackend.CPU
 }
+
+/** /status 会话段：当前会话 id、节点规模、活动分支与摘要段数。 */
+internal fun sessionStatusText(
+    sessionId: String,
+    nodeCount: Int,
+    branchNodes: Int,
+    summaries: Int,
+): String = "会话：$sessionId，节点 $nodeCount，活动分支 $branchNodes 节点，摘要 $summaries 段"
 
 /** 压缩结果 → 中文回显。 */
 internal fun describeCompaction(result: CompactionResult): String = when (result) {
