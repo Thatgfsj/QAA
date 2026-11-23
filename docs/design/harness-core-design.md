@@ -6,7 +6,6 @@
 | 上游契约 | docs/ARCHITECTURE.md（单一事实来源；本文第 2/3/9 章与其第 3/5/7 节逐条对齐） |
 | 模块归属 | :core-harness / :core-tools / :core-inference 职责切分沿用 ARCHITECTURE.md 第 2 节 |
 | 配套附录 | docs/design/harness-core-appendix.md（JVM 单测清单 + 扩展样例） |
-| 撰写位置 | git worktree QAA-wt-design，分支 docs/harness-design |
 
 > 阅读约定：本文只做设计，不含实现代码；所有 Kotlin 片段均为接口契约或伪代码。标注「与
 > ARCHITECTURE.md 一致」的定义，修改必须先经 Issue → PR 同步上游，再改本文。
