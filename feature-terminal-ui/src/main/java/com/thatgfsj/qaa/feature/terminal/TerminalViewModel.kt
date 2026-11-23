@@ -2,6 +2,7 @@ package com.thatgfsj.qaa.feature.terminal
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,19 +15,22 @@ import kotlinx.coroutines.launch
  * 对外接线预留（骨架期全部为空实现 / fake 数据）：
  * - 命令层 Issue #10：[onUserInput] 回显用户输入、[resetSession] 支撑「清屏再渲染」、
  *   [setMode] / [setModelInfo] / [setBackend] 对应 chat / agent / model / backend 命令回显；
- * - 推理层 Issue #5：[onAiChunk] 流式片段回填；metrics 经 [bindMetrics] 以
- *   StateFlow&lt;TerminalMetricsSnapshot&gt; 形状接入（骨架期接 [FakeMetricsTicker]）；
+ * - 推理层 Issue #5：[onAiChunk] 流式片段回填；metrics 经 [bindEngineMetrics] 以
+ *   StateFlow&lt;TerminalMetricsSnapshot&gt; 形状接入真实引擎指标（[FakeMetricsTicker] 仅骨架单测用）；
  * - 工具确认流 Issue #14：实现 [TerminalToolConfirmHost]，配合 [TerminalUiGate] 完成
  *   挂起 / Allow / Deny / 取消清理（真实工具调用由 AgentLoop 触发）。
  *
  * 线程契约：所有变更方法在 UI 主线程（或单测线程）调用，快照更新无锁。
  */
 class TerminalViewModel internal constructor(
-    metricsTicker: FakeMetricsTicker,
+    metricsTicker: FakeMetricsTicker?,
 ) : ViewModel(), TerminalToolConfirmHost {
 
-    /** 无参构造：供 ViewModelProvider 默认工厂与 Issue #10 路由装配使用。 */
-    constructor() : this(FakeMetricsTicker())
+    /**
+     * 无参构造：供 ViewModelProvider 默认工厂与命令层装配使用。
+     * 不启动模块内伪数据心跳——统计栏由装配层经 [bindEngineMetrics] 注入真实指标源。
+     */
+    constructor() : this(null)
 
     private val _uiState = MutableStateFlow(TerminalUiState())
     override val uiState: StateFlow<TerminalUiState> = _uiState.asStateFlow()
@@ -34,17 +38,31 @@ class TerminalViewModel internal constructor(
     private var nextEntryId = 1L
     private var nextToolRequestId = 1L
 
+    private var fakeMetricsJob: Job? = null
+
     init {
-        // 骨架期直连模块内 fake 数据源；Issue #5 后由装配层改传真实 metrics 流。
-        bindMetrics(metricsTicker.metrics)
-        metricsTicker.launchIn(viewModelScope)
+        // 显式注入伪数据源时才启动心跳（骨架期单测用），生产由装配层注入真实指标。
+        if (metricsTicker != null) {
+            fakeMetricsJob = metricsTicker.launchIn(viewModelScope)
+            bindMetrics(metricsTicker.metrics)
+        }
     }
 
-    /** 接入推理指标状态流（Issue #5 接线点）。重复绑定会叠加收集，装配层应只调一次。 */
+    /** 接入推理指标状态流（接线点）。重复绑定会叠加收集，装配层应只调一次。 */
     fun bindMetrics(source: StateFlow<TerminalMetricsSnapshot>) {
         viewModelScope.launch {
             source.collect { snapshot -> updateState { it.copy(metrics = snapshot) } }
         }
+    }
+
+    /**
+     * 接入真实引擎指标源（装配层）：先停掉模块内伪数据心跳，再绑定，
+     * 避免两个来源争写统计栏导致显示跳变。
+     */
+    fun bindEngineMetrics(source: StateFlow<TerminalMetricsSnapshot>) {
+        fakeMetricsJob?.cancel()
+        fakeMetricsJob = null
+        bindMetrics(source)
     }
 
     /** 用户输入一行：立即以「你 &lt; 」前缀回显（命令语义由 Issue #10 解析层赋予）。 */

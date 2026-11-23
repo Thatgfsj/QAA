@@ -65,8 +65,8 @@ class ShellHelpSnapshotTest {
     ------------------    --------  ----------
     help / /help          全部      显示本帮助
     model                 顶层      列出本地模型
-    model pull <url>      顶层      下载模型（议题 #19）
-    model import          顶层      导入模型（议题 #19）
+    model pull <url>      顶层      下载模型（断点续传）
+    model import          顶层      导入模型（SAF 占位）
     chat <模型名|序号>    顶层      进入 CHAT 会话
     agent [模型名|序号]   顶层      进入 AGENT 会话
     start window          顶层      切回正常窗口并重启
@@ -75,17 +75,17 @@ class ShellHelpSnapshotTest {
     clear                 顶层      清空当前会话区
     /status               全部      查看阶段与运行状态
     /exit                 会话      退出会话回顶层态
-    /tree                 会话      查看会话树（议题 #15）
-    /fork [节点ID]        会话      分叉节点（议题 #15）
-    /compact              会话      压缩上下文（议题 #16）
-    /steer <指令>         会话      运行中干预（议题 #17）
-    /skills               会话      查看技能（议题 #47）
+    /tree                 会话      查看会话树
+    /fork [节点ID]        会话      以节点为分叉点
+    /compact              会话      压缩上下文
+    /steer <指令>         会话      运行中干预
+    /skills               会话      查看可用技能
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
     · chat / agent 支持模型名或从 1 起的序号；输入 model 查看本地模型清单。
     · backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。
-    · 标注议题号的命令当前为占位提示，执行体随对应议题落地。
+    · 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。
         """.trimIndent().trimEnd()
     }
 }
