@@ -42,6 +42,8 @@ class TerminalShellControllerTest {
         agent: TerminalAgentPort? = null,
         modelList: TerminalModelListPort? = null,
         modelPull: TerminalModelPullPort? = null,
+        onRequestModelImport: () -> Unit = {},
+        onRequestStorageGrant: () -> Unit = {},
         scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     ): TerminalShellController = TerminalShellController(
         viewModel = viewModel,
@@ -50,6 +52,8 @@ class TerminalShellControllerTest {
         agent = agent,
         modelList = modelList,
         modelPull = modelPull,
+        onRequestModelImport = onRequestModelImport,
+        onRequestStorageGrant = onRequestStorageGrant,
         scope = scope,
     )
 
@@ -315,14 +319,25 @@ class TerminalShellControllerTest {
     }
 
     @Test
-    fun modelImportKeepsPlaceholderWithoutSideEffects() = runTest {
+    fun modelImportRequestsPickerFromHost() = runTest {
         val viewModel = TerminalViewModel()
-        val shell = controller(viewModel, scope = this)
+        var requests = 0
+        val shell = controller(viewModel, onRequestModelImport = { requests += 1 }, scope = this)
         shell.onInput("model import")
         advanceUntilIdle()
-        val texts = viewModel.uiState.value.entries.map { it.text }
-        assertTrue(texts.any { it.contains("SAF") })
-        assertTrue(texts.any { it.contains("占位") })
+        assertEquals(1, requests)
+        assertTrue(viewModel.uiState.value.entries.any { it.text.contains("系统文件选择器") })
+    }
+
+    @Test
+    fun storageGrantRequestsPickerFromHost() = runTest {
+        val viewModel = TerminalViewModel()
+        var requests = 0
+        val shell = controller(viewModel, onRequestStorageGrant = { requests += 1 }, scope = this)
+        shell.onInput("storage grant")
+        advanceUntilIdle()
+        assertEquals(1, requests)
+        assertTrue(viewModel.uiState.value.entries.any { it.text.contains("目录选择器") })
     }
 
     @Test

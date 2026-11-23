@@ -100,10 +100,11 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun modelImportKeepsSafePlaceholder() {
-        val text = parse("model import").text()
-        assertTrue(text.contains("SAF"))
-        assertTrue(text.contains("占位"))
+    fun modelImportRequestsSystemFilePicker() {
+        val result = parse("model import")
+        assertEquals(listOf(ShellEffect.ImportModel), result.effects)
+        assertTrue(result.text().contains("系统文件选择器"))
+        assertTrue(result.text().contains(".gguf"))
     }
 
     @Test
@@ -245,10 +246,11 @@ class ShellCommandParserTest {
     // ---- storage grant ----
 
     @Test
-    fun storageGrantIsStubbedWithSandboxIssue() {
-        val text = parse("storage grant").text()
-        assertTrue(text.contains("SAF"))
-        assertTrue(text.contains("#18"))
+    fun storageGrantRequestsSystemDirectoryPicker() {
+        val result = parse("storage grant")
+        assertEquals(listOf(ShellEffect.GrantStorage), result.effects)
+        assertTrue(result.text().contains("目录选择器"))
+        assertTrue(result.text().contains("授权"))
     }
 
     @Test

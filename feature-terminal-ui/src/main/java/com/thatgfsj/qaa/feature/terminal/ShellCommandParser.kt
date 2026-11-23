@@ -62,10 +62,10 @@ object ShellCommandParser {
             "import" -> if (tokens.size > 2) {
                 usage(context, "model import", "model import 不接受参数，导入文件由系统文件选择器（SAF）提供。")
             } else {
-                reply(
-                    context,
-                    "模型导入（SAF 旁加载）：请在系统文件选择器中选取 GGUF 文件。",
-                    "本入口暂为占位：文件选择器接线待落地，模型目录为 App 私有目录 filesDir/models。",
+                ShellParseResult(
+                    stage = context.stage,
+                    output = listOf("正在打开系统文件选择器，请选择要导入的 .gguf 模型文件…"),
+                    effects = listOf(ShellEffect.ImportModel),
                 )
             }
             else -> error(
@@ -161,10 +161,10 @@ object ShellCommandParser {
 
     private fun parseStorage(tokens: List<String>, context: ShellContext): ShellParseResult {
         if (tokens.size == 2 && tokens[1].equals("grant", ignoreCase = true)) {
-            return reply(
-                context,
-                "已收到外部存储（SAF）目录授权请求。",
-                "目录授权与沙盒根接入的执行体随沙盒 SAF 议题落地（#18），本期仅回显解析结果。",
+            return ShellParseResult(
+                stage = context.stage,
+                output = listOf("正在打开系统目录选择器，请选择要授权给沙盒的外部目录…"),
+                effects = listOf(ShellEffect.GrantStorage),
             )
         }
         return usage(context, "storage grant", "storage 仅支持 storage grant 一个子命令。")

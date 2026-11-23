@@ -4,8 +4,8 @@ import java.nio.file.Path
 
 /**
  * 授权根：一个可读写的目录挂载点（docs/design/harness-core-design.md §3.2）。
- * App 私有目录为默认根；外部存储授权目录（SAF grant）后续作为新的
- * [SandboxRoot] 注入，无需改动工具实现。
+ * App 私有目录为默认根；外部存储授权目录（SAF grant）经 [LocalSandboxFs.addRoot]
+ * 动态挂载，无需改动工具实现。
  */
 data class SandboxRoot(
     /** 挂载点 id：路径首段与之相等（区分大小写）时定位到该根。 */

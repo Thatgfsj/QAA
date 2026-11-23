@@ -87,6 +87,12 @@ sealed interface ShellEffect {
     /** model pull <url>：交给拉取端口执行，进度与结果回显到对话区。 */
     data class PullModel(val url: String) : ShellEffect
 
+    /** model import：打开系统文件选择器，选中 GGUF 后导入并登记。 */
+    data object ImportModel : ShellEffect
+
+    /** storage grant：打开系统目录选择器，授权外部目录并挂载为沙盒根。 */
+    data object GrantStorage : ShellEffect
+
     /** /tree：向 Agent 端口取会话树快照。 */
     data object QueryTree : ShellEffect
 
