@@ -1,0 +1,264 @@
+package com.thatgfsj.qaa.feature.terminal
+
+/**
+ * Shell 命令解析器（Issue #10）：纯函数、纯 Kotlin，与 Compose / Android 完全解耦，可 JVM 单测。
+ *
+ * 双状态机：SHELL 顶层态解析命令；SESSION 会话态解析控制命令（/ 开头），
+ * 其余文字一律视为用户 prompt。解析器只产出 [ShellParseResult]，状态流转与视图更新
+ * 由 [TerminalShellController] 负责。
+ */
+object ShellCommandParser {
+
+    private val WHITESPACE = Regex("\\s+")
+
+    /** 解析一行输入；空行返回无输出、无副作用的结果，阶段保持不变。 */
+    fun parse(input: String, context: ShellContext = ShellContext()): ShellParseResult {
+        val line = input.trim()
+        if (line.isEmpty()) return ShellParseResult(context.stage)
+        val tokens = line.split(WHITESPACE)
+        return when (context.stage) {
+            ShellStage.SHELL -> parseShellCommand(tokens, context)
+            ShellStage.SESSION -> parseSessionCommand(tokens, line, context)
+        }
+    }
+
+    // ---- SHELL 顶层态 ----
+
+    private fun parseShellCommand(tokens: List<String>, context: ShellContext): ShellParseResult {
+        return when (tokens.first().lowercase()) {
+            "help", "/help" -> reply(context, shellHelpText())
+            "model" -> parseModel(tokens, context)
+            "chat" -> enterSession(tokens, TerminalMode.CHAT, context)
+            "agent" -> enterSession(tokens, TerminalMode.AGENT, context)
+            "start" -> parseStartWindow(tokens, context)
+            "backend" -> parseBackend(tokens, context)
+            "storage" -> parseStorage(tokens, context)
+            "clear" -> parseClear(tokens, context)
+            "/status" -> reply(context, shellStatusText(context))
+            "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
+            else -> unknownShellCommand(tokens.first(), context)
+        }
+    }
+
+    private fun parseModel(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size == 1) return reply(context, localModelListText(context.models, context.modelInfo))
+        return when (tokens[1].lowercase()) {
+            "pull" -> when {
+                tokens.size == 2 -> usage(context, "model pull <url>", "需要提供模型下载地址（http / https）。")
+                tokens.size > 3 -> usage(context, "model pull <url>", "model pull 只接受一个下载地址参数。")
+                !isHttpUrl(tokens[2]) -> error(
+                    context,
+                    "下载地址无效：${tokens[2]}。请提供以 http:// 或 https:// 开头的地址。",
+                )
+                else -> reply(
+                    context,
+                    "已解析模型下载地址：${tokens[2]}",
+                    "模型下载（断点续传）执行体随议题 #19 落地，本期仅回显解析结果。",
+                )
+            }
+            "import" -> if (tokens.size > 2) {
+                usage(context, "model import", "model import 不接受参数，导入文件由系统文件选择器（SAF）提供。")
+            } else {
+                reply(context, "模型导入（SAF 旁加载）：该命令执行体随对应议题落地（#19）。")
+            }
+            else -> error(
+                context,
+                "未知 model 子命令：${tokens[1]}。可用：model、model pull <url>、model import。",
+            )
+        }
+    }
+
+    private fun enterSession(
+        tokens: List<String>,
+        mode: TerminalMode,
+        context: ShellContext,
+    ): ShellParseResult {
+        val command = mode.displayTag.lowercase()
+        val modelToken = tokens.getOrNull(1)
+        if (tokens.size > 2) return usage(context, "$command [模型名|序号]", "$command 只接受一个模型参数。")
+        if (modelToken == null) {
+            if (mode == TerminalMode.CHAT) {
+                return usage(
+                    context,
+                    "chat <模型名|序号>",
+                    "CHAT 会话需要指定本地模型，例如 chat 1；输入 model 查看本地模型清单。",
+                )
+            }
+            return enterSessionResult(context, mode, model = null)
+        }
+        val model = resolveModel(modelToken, context)
+            ?: return error(
+                context,
+                "未找到本地模型：$modelToken。输入 model 查看本地模型清单（名称或从 1 起的序号）。",
+            )
+        return enterSessionResult(context, mode, model)
+    }
+
+    private fun enterSessionResult(
+        context: ShellContext,
+        mode: TerminalMode,
+        model: LocalModelEntry?,
+    ): ShellParseResult {
+        val effects = buildList {
+            add(ShellEffect.ClearScreen)
+            add(ShellEffect.SetMode(mode))
+            if (model != null) add(ShellEffect.SelectModel(model))
+        }
+        val modelText = model?.displayText ?: context.modelInfo.displayText
+        return ShellParseResult(
+            stage = ShellStage.SESSION,
+            output = listOf(
+                "已清屏并进入 ${mode.displayTag} 会话，模型：$modelText。",
+                "直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态，输入 /help 查看会话命令。",
+            ),
+            effects = effects,
+        )
+    }
+
+    private fun parseStartWindow(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size != 2 || !tokens[1].equals("window", ignoreCase = true)) {
+            return usage(context, "start window", "start 仅支持 start window，且不接受多余参数。")
+        }
+        return ShellParseResult(
+            stage = context.stage,
+            output = listOf("正在切回正常窗口，App 将立即重启…"),
+            effects = listOf(ShellEffect.StartNormalWindow),
+        )
+    }
+
+    private fun parseBackend(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size == 1) {
+            return reply(
+                context,
+                "请求后端：${context.requestedBackend.displayName}",
+                "实际命中：${context.activeBackend.displayTag}",
+                "用法：backend [auto|npu|hybrid|cpu]；无参数查看，带参数锁定请求后端。",
+            )
+        }
+        if (tokens.size > 2) return usage(context, "backend [auto|npu|hybrid|cpu]", "backend 只接受一个参数。")
+        val request = BackendRequest.fromCommand(tokens[1])
+            ?: return error(context, "无效的后端参数：${tokens[1]}。可选值：auto、npu、hybrid、cpu。")
+        val lines = if (request == BackendRequest.AUTO) {
+            listOf("已恢复自动降级链（请求后端 auto）；实际命中由推理结果回显。")
+        } else {
+            listOf(
+                "已锁定请求后端：${request.displayName}；顶栏回显同步更新，推理启动后以实际命中为准。",
+            )
+        }
+        return ShellParseResult(
+            stage = context.stage,
+            output = lines,
+            effects = listOf(ShellEffect.SetBackend(request)),
+        )
+    }
+
+    private fun parseStorage(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size == 2 && tokens[1].equals("grant", ignoreCase = true)) {
+            return reply(
+                context,
+                "已收到外部存储（SAF）目录授权请求。",
+                "目录授权与沙盒根接入的执行体随沙盒 SAF 议题落地（#18），本期仅回显解析结果。",
+            )
+        }
+        return usage(context, "storage grant", "storage 仅支持 storage grant 一个子命令。")
+    }
+
+    private fun parseClear(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 1) return usage(context, "clear", "clear 不接受参数。")
+        return ShellParseResult(
+            stage = context.stage,
+            output = listOf("已清空当前会话区。"),
+            effects = listOf(ShellEffect.ClearScreen),
+        )
+    }
+
+    private fun unknownShellCommand(head: String, context: ShellContext): ShellParseResult =
+        if (head.startsWith("/")) {
+            error(context, "未知命令：$head。会话命令需先通过 chat / agent 进入会话态；输入 help 查看可用命令。")
+        } else {
+            error(context, "未知命令：$head。输入 help 查看可用命令。")
+        }
+
+    // ---- SESSION 会话态 ----
+
+    private fun parseSessionCommand(
+        tokens: List<String>,
+        line: String,
+        context: ShellContext,
+    ): ShellParseResult {
+        val head = tokens.first()
+        if (!head.startsWith("/")) {
+            return ShellParseResult(context.stage, effects = listOf(ShellEffect.ForwardPrompt(line)))
+        }
+        return when (head.lowercase()) {
+            "/help" -> reply(context, shellHelpText())
+            "/status" -> reply(context, shellStatusText(context))
+            "/exit" -> exitSession(tokens, context)
+            "/tree" -> stubCommand(tokens, context, "/tree", "会话树", "#15")
+            "/fork" -> fork(tokens, context)
+            "/compact" -> stubCommand(tokens, context, "/compact", "上下文压缩", "#16")
+            "/steer" -> steer(tokens, line, context)
+            "/skills" -> stubCommand(tokens, context, "/skills", "技能列表（SkillRegistry）", "#47")
+            else -> error(
+                context,
+                "未知会话命令：$head。可用命令：/exit、/tree、/fork、/compact、/steer、/skills；" +
+                    "输入 /help 查看完整说明。",
+            )
+        }
+    }
+
+    private fun exitSession(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 1) return usage(context, "/exit", "/exit 不接受参数。")
+        return ShellParseResult(
+            stage = ShellStage.SHELL,
+            output = listOf("已退出会话，返回 Shell 顶层态。输入 help 查看命令。"),
+        )
+    }
+
+    private fun fork(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 2) return usage(context, "/fork [节点ID]", "/fork 最多接受一个节点 ID。")
+        val node = tokens.getOrNull(1)
+        val label = if (node.isNullOrBlank()) "从当前节点分叉" else "从节点 $node 分叉"
+        return reply(context, "$label：该命令执行体随对应议题落地（#15）。")
+    }
+
+    private fun steer(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {
+        if (tokens.size < 2) return usage(context, "/steer <指令>", "/steer 需要附带干预指令。")
+        val instruction = line.substringAfter(tokens.first()).trim()
+        return reply(context, "已记录干预指令：$instruction。该命令执行体随对应议题落地（#17）。")
+    }
+
+    private fun stubCommand(
+        tokens: List<String>,
+        context: ShellContext,
+        command: String,
+        label: String,
+        issue: String,
+    ): ShellParseResult {
+        if (tokens.size > 1) return usage(context, command, "$command 暂不接受参数。")
+        return reply(context, "$label：该命令执行体随对应议题落地（$issue）。")
+    }
+
+    // ---- 公共辅助 ----
+
+    private fun resolveModel(token: String, context: ShellContext): LocalModelEntry? {
+        val index = token.toIntOrNull()
+        return if (index != null) {
+            context.models.firstOrNull { it.index == index }
+        } else {
+            context.models.firstOrNull { it.name.equals(token, ignoreCase = true) }
+        }
+    }
+
+    private fun isHttpUrl(value: String): Boolean =
+        (value.startsWith("http://") || value.startsWith("https://")) && value.length > "https://".length
+
+    private fun reply(context: ShellContext, vararg lines: String): ShellParseResult =
+        ShellParseResult(stage = context.stage, output = lines.toList())
+
+    private fun error(context: ShellContext, message: String): ShellParseResult =
+        ShellParseResult(stage = context.stage, output = listOf(message))
+
+    private fun usage(context: ShellContext, usage: String, hint: String): ShellParseResult =
+        ShellParseResult(stage = context.stage, output = listOf("参数不正确。用法：$usage", hint))
+}
