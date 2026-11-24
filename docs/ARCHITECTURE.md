@@ -118,4 +118,4 @@ stateDiagram-v2
 
 ## 7. Agent Loop 概览
 
-单步循环：模型流式输出 → 工具调用 JSON 严格解析（容错提取 + 重试上限）→ 非授权确认（Allow / Deny，yoloMode 预留默认 false）→ ToolExecutor 执行 → 结果回注 → 直至无工具调用或达 maxToolSteps。工具仅 4 个原语：`read` `write` `edit` `draw_image`；System Prompt 保持极简以降低 Prefill 开销。
+单步循环：模型流式输出 → 工具调用 JSON 严格解析（容错提取 + 重试上限；另兼容 `<tool_call>` 族 XML 方言，见设计文档 4.2 第 0 级）→ 非授权确认（Allow / Deny，yoloMode 预留默认 false）→ ToolExecutor 执行 → 结果回注 → 直至无工具调用或达 maxToolSteps。工具仅 4 个原语：`read` `write` `edit` `draw_image`；System Prompt 保持极简以降低 Prefill 开销。
