@@ -132,4 +132,36 @@ class AgentLoopParseToleranceTest {
         assertEquals(2, engine.receivedMessages.size)
         assertTrue(recorder.nodes.none { "correction" in it.tags })
     }
+
+    @Test
+    fun T7_真机XML方言_触发确认门并执行() = runTest {
+        // Issue #107 真机形态：XML 方言必须走确认门执行，不得被当作纯文本终答。
+        val xml = """<tool_call>write<arg_key>content</arg_key><arg_value>QAA-real-device-test</arg_value><arg_key>path</arg_key><arg_value>test.txt</arg_value></tool_call>"""
+        val engine = FakeLlmEngine(listOf(xml, "已写入 test.txt。"))
+        val tools = FakeToolGateway()
+        val gate = FakeConfirmationGate(listOf(ConfirmationDecision.ALLOW))
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, gate = gate, recorder = recorder).runTurn("写 test.txt")
+
+        assertEquals(listOf("write"), tools.executed.map { it.call.tool })
+        assertEquals("write", gate.seen.single().tool)
+        assertEquals(2, engine.receivedMessages.size)
+        assertEquals(1, recorder.nodes.count { it.role == TurnRole.TOOL && it.tags.isEmpty() })
+    }
+
+    @Test
+    fun T8_工具痕迹但解析失败_走纠错而非静默终答() = runTest {
+        // XML 方言未知工具：返回 Invalid 回注纠错，而不是把工具调用当纯文本回显。
+        val broken = """<tool_call>hack<arg_key>a</arg_key><arg_value>b</arg_value></tool_call>"""
+        val engine = FakeLlmEngine(listOf(broken, "抱歉，我直接回答。"))
+        val tools = FakeToolGateway()
+        val recorder = InMemoryTurnRecorder()
+        loop(engine = engine, tools = tools, recorder = recorder).runTurn("调用工具")
+
+        assertTrue(tools.executed.isEmpty())
+        assertEquals(2, engine.receivedMessages.size)
+        val notice = engine.receivedMessages[1].last().content
+        assertTrue(notice, notice.contains("未知工具：hack"))
+        assertEquals(1, recorder.nodes.count { "correction" in it.tags })
+    }
 }
