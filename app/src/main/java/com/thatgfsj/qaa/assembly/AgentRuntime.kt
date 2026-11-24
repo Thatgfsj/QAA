@@ -43,6 +43,10 @@ import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
+import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
+import com.thatgfsj.qaa.feature.normal.models.NormalModelEntry
+import com.thatgfsj.qaa.feature.normal.models.NormalModelPort
+import com.thatgfsj.qaa.feature.normal.models.NormalResumeTask
 import com.thatgfsj.qaa.feature.terminal.BackendRequest
 import com.thatgfsj.qaa.feature.terminal.LocalModelEntry
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentPort
@@ -88,7 +92,8 @@ class AgentRuntime private constructor(private val appContext: Context) :
     TerminalAgentPort,
     NormalAgentPort,
     TerminalModelListPort,
-    TerminalModelPullPort {
+    TerminalModelPullPort,
+    NormalModelPort {
 
     private val filesDir: File = appContext.filesDir
     private val modelsDir = File(filesDir, MODELS_DIR)
@@ -111,6 +116,16 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val sandbox = LocalSandboxFs(listOf(SandboxRoot.File(SANDBOX_ROOT_ID, filesDir.toPath())))
     private val storageGrant = StorageGrant(appContext, sandbox)
     private val modelImport = ModelImportCoordinator(modelsDir, catalog)
+
+    // 下载记录（私有清单文件）与编排：Application 级 scope 持有；进程退出后记录留存，
+    // 重进模型管理页时由 recover 检测未完成任务并提示继续（SDK 侧分块保留）。
+    private val downloadTracker = ModelDownloadTracker(File(filesDir, ModelDownloadTracker.FILE_NAME))
+    private val downloads = ModelDownloadCoordinator(
+        tracker = downloadTracker,
+        catalog = catalog,
+        scope = scope,
+        pullClient = pullClient,
+    )
 
     @Volatile
     private var sessionStore = TreeSessionStore(
@@ -211,6 +226,8 @@ class AgentRuntime private constructor(private val appContext: Context) :
         if (startRequested) return
         startRequested = true
         scope.launch { initialize() }
+        // 启动即清点上次遗留的下载任务（幂等）：可续传则暴露给模型管理页。
+        scope.launch { downloads.recover() }
     }
 
     // ---- TerminalAgentPort ----
@@ -366,6 +383,38 @@ class AgentRuntime private constructor(private val appContext: Context) :
             emit(event.toTerminalEvent())
         }
     }
+
+    // ---- NormalModelPort ----
+
+    override val downloadState: StateFlow<NormalDownloadState> = downloads.state
+
+    override val resumeTask: StateFlow<NormalResumeTask?> = downloads.resumeTask
+
+    override suspend fun modelEntries(): List<NormalModelEntry> = catalog.list().map { entry ->
+        NormalModelEntry(
+            ordinal = entry.ordinal,
+            name = entry.name,
+            quantization = entry.quantization,
+            sizeBytes = entry.sizeBytes,
+            sourceLabel = when (entry.source) {
+                ModelSource.BUILT_IN -> "内置"
+                ModelSource.PULL -> "Hub 下载"
+                ModelSource.IMPORT -> "本地导入"
+            },
+        )
+    }
+
+    override suspend fun loadModel(ordinal: Int): String = selectModel(ordinal.toString())
+
+    override fun validateSource(source: String): String? = downloads.validate(source)
+
+    override fun startDownload(source: String): String? = downloads.start(source)
+
+    override fun cancelDownload() = downloads.cancel()
+
+    override fun discardDownload() = downloads.discard()
+
+    override suspend fun recoverDownload() = downloads.recover()
 
     // ---- 系统选择器接线 ----
 
