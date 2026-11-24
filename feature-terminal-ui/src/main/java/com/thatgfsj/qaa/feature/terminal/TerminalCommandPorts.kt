@@ -125,4 +125,10 @@ interface TerminalAgentPort {
 
     /** /ctx <档位>：切换上下文长度（≤8192 且已加载时自动重载，>8192 只保存）（#106）。 */
     suspend fun setContextLength(tokens: Int): String
+
+    /** /system：查询系统提示词全文与来源（默认 / 自定义）（#105）。 */
+    suspend fun systemPrompt(): String
+
+    /** /system <文本|reset>：整体替换系统提示词；null 表示恢复默认，返回中文回执（#105）。 */
+    suspend fun setSystemPrompt(text: String?): String
 }

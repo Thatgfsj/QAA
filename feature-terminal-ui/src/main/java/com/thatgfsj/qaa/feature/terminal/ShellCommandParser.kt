@@ -19,14 +19,18 @@ object ShellCommandParser {
         if (line.isEmpty()) return ShellParseResult(context.stage)
         val tokens = line.split(WHITESPACE)
         return when (context.stage) {
-            ShellStage.SHELL -> parseShellCommand(tokens, context)
+            ShellStage.SHELL -> parseShellCommand(tokens, line, context)
             ShellStage.SESSION -> parseSessionCommand(tokens, line, context)
         }
     }
 
     // ---- SHELL 顶层态 ----
 
-    private fun parseShellCommand(tokens: List<String>, context: ShellContext): ShellParseResult {
+    private fun parseShellCommand(
+        tokens: List<String>,
+        line: String,
+        context: ShellContext,
+    ): ShellParseResult {
         return when (tokens.first().lowercase()) {
             "help", "/help" -> reply(context, shellHelpText())
             "model" -> parseModel(tokens, context)
@@ -38,6 +42,7 @@ object ShellCommandParser {
             "clear" -> parseClear(tokens, context)
             "/logs" -> logs(tokens, context)
             "/ctx" -> contextLength(tokens, context)
+            "/system" -> systemPrompt(tokens, line, context)
             "/status" -> statusResult(context)
             "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
             else -> unknownShellCommand(tokens.first(), context)
@@ -211,9 +216,10 @@ object ShellCommandParser {
             "/export" -> export(tokens, context)
             "/logs" -> logs(tokens, context)
             "/ctx" -> contextLength(tokens, context)
+            "/system" -> systemPrompt(tokens, line, context)
             else -> error(
                 context,
-                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs、/ctx；" +
+                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs、/ctx、/system；" +
                     "输入 /help 查看完整说明。",
             )
         }
@@ -285,6 +291,20 @@ object ShellCommandParser {
             )
         }
         return ShellParseResult(context.stage, effects = listOf(ShellEffect.SetContextLength(value)))
+    }
+
+    /**
+     * /system [文本|reset]：无参查询当前系统提示词与来源；带文本整体替换；reset 恢复默认（#105）。
+     * 两个阶段都可用：初始化失败时也能先在 Shell 顶层态固定提示词。
+     */
+    private fun systemPrompt(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {
+        val raw = line.substringAfter(tokens.first()).trim()
+        return when {
+            raw.isEmpty() -> ShellParseResult(context.stage, effects = listOf(ShellEffect.QuerySystemPrompt))
+            raw.equals("reset", ignoreCase = true) ->
+                ShellParseResult(context.stage, effects = listOf(ShellEffect.SetSystemPrompt(null)))
+            else -> ShellParseResult(context.stage, effects = listOf(ShellEffect.SetSystemPrompt(raw)))
+        }
     }
 
     private fun steer(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {

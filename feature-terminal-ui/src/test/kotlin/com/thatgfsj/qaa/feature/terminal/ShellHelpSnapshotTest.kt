@@ -36,10 +36,11 @@ class ShellHelpSnapshotTest {
             "/export [路径]",
             "/logs [行数]",
             "/ctx [档位]",
+            "/system [文本|reset]",
         )
         val text = shellHelpText()
         commands.forEach { command -> assertTrue("缺少命令：$command", text.contains(command)) }
-        assertEquals(21, rowsOf(text).size)
+        assertEquals(22, rowsOf(text).size)
     }
 
     @Test
@@ -88,6 +89,7 @@ class ShellHelpSnapshotTest {
     /export [路径]        会话      导出当前分支轨迹
     /logs [行数]          全部      导出应用内日志（默认 200 行）
     /ctx [档位]           全部      查看 / 设置上下文长度
+    /system [文本|reset]  全部      查看 / 设置系统提示词
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
@@ -95,6 +97,7 @@ class ShellHelpSnapshotTest {
     · backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。
     · /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。
     · /ctx 档位：4096 / 8192 / 16384 / 32768；≤8192 且模型已加载时自动重载生效，更大档位需重新载入模型。
+    · /system 无参查看系统提示词全文与来源；带文本整体替换，/system reset 恢复默认；提示词每轮组装，下一轮生效。
     · 长上下文（≥16384）在 HTP/NPU 上可能触发 abort，建议先用小档位验证。
     · 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。
         """.trimIndent().trimEnd()

@@ -523,4 +523,45 @@ class ShellCommandParserTest {
         val text = parse("/foo", session).text()
         assertTrue(text.contains("/ctx"))
     }
+
+    // ---- #105 /system 系统提示词 ----
+
+    @Test
+    fun systemWithoutArgumentQueriesInBothStages() {
+        val sessionResult = parse("/system", session)
+        assertEquals(listOf(ShellEffect.QuerySystemPrompt), sessionResult.effects)
+        assertTrue(sessionResult.output.isEmpty())
+        assertEquals(listOf(ShellEffect.QuerySystemPrompt), parse("/system", shell).effects)
+    }
+
+    @Test
+    fun systemWithTextReplacesWholePromptAndKeepsSpaces() {
+        assertEquals(
+            listOf(ShellEffect.SetSystemPrompt("你是简洁助手，只回答中文")),
+            parse("/system 你是简洁助手，只回答中文", session).effects,
+        )
+        assertEquals(
+            listOf(ShellEffect.SetSystemPrompt("两段文本 保留中间空格")),
+            parse("/system 两段文本 保留中间空格", session).effects,
+        )
+    }
+
+    @Test
+    fun systemResetCarriesNullToRestoreDefault() {
+        assertEquals(listOf(ShellEffect.SetSystemPrompt(null)), parse("/system reset", session).effects)
+        assertEquals(listOf(ShellEffect.SetSystemPrompt(null)), parse("/system RESET", session).effects)
+    }
+
+    @Test
+    fun systemResetFollowedByTextIsTreatedAsLiteralPrompt() {
+        assertEquals(
+            listOf(ShellEffect.SetSystemPrompt("reset 之后还有文本")),
+            parse("/system reset 之后还有文本", session).effects,
+        )
+    }
+
+    @Test
+    fun systemIsListedInUnknownSessionCommandHint() {
+        assertTrue(parse("/foo", session).text().contains("/system"))
+    }
 }

@@ -15,7 +15,6 @@ import com.thatgfsj.qaa.core.harness.JsonlTurnRecorder
 import com.thatgfsj.qaa.core.harness.LoraTraceExporter
 import com.thatgfsj.qaa.core.harness.PromptAssembler
 import com.thatgfsj.qaa.core.harness.SessionRole
-import com.thatgfsj.qaa.core.harness.SkipReason
 import com.thatgfsj.qaa.core.harness.SkillRegistry
 import com.thatgfsj.qaa.core.harness.SteerQueue
 import com.thatgfsj.qaa.core.harness.SteerTurnDriver
@@ -24,7 +23,6 @@ import com.thatgfsj.qaa.core.harness.TreeSessionStore
 import com.thatgfsj.qaa.core.harness.summarizeToolCall
 import com.thatgfsj.qaa.core.inference.AndroidAssetSource
 import com.thatgfsj.qaa.core.inference.AssetModelReleaser
-import com.thatgfsj.qaa.core.inference.CatalogEntry
 import com.thatgfsj.qaa.core.inference.ComputeBackend
 import com.thatgfsj.qaa.core.inference.ContentResolverDocument
 import com.thatgfsj.qaa.core.inference.DefaultGenieXModelGateway
@@ -47,7 +45,9 @@ import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
 import com.thatgfsj.qaa.data.ContextLengthStore
+import com.thatgfsj.qaa.data.SystemPromptStore
 import com.thatgfsj.qaa.data.dataStoreContextLengthStore
+import com.thatgfsj.qaa.data.dataStoreSystemPromptStore
 import com.thatgfsj.qaa.feature.normal.chat.ChatMetrics
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
@@ -101,6 +101,7 @@ import kotlinx.coroutines.withContext
 class AgentRuntime private constructor(
     private val appContext: Context,
     private val contextLengthStore: ContextLengthStore,
+    private val systemPromptStore: SystemPromptStore,
 ) :
     TerminalAgentPort,
     NormalAgentPort,
@@ -151,10 +152,14 @@ class AgentRuntime private constructor(
     private val tokenCounter = HeuristicTokenCounter()
     private val promptAssembler = PromptAssembler(skillsSection = skills.describeAll())
 
-    /** PromptAssembler 稳定前缀（system + skills 两段）的 token 数：只计一次并缓存（#106）。 */
-    private val stablePrefixTokens: Int by lazy {
-        tokenCounter.countMessages(promptAssembler.assemble(emptyList()))
+    /** 系统提示词生效策略（#105）：每轮组装前从 DataStore 同步，终端 /system 与设置页共用。 */
+    private val systemPromptSwitcher = SystemPromptSwitcher(systemPromptStore) {
+        promptAssembler.updateSystemSection(it)
     }
+
+    /** PromptAssembler 稳定前缀（system + skills 两段）的 token 数：提示词变更后按当前系统段重算（#105）。 */
+    private val stablePrefixTokens: Int
+        get() = tokenCounter.countMessages(promptAssembler.assemble(emptyList()))
     private val compactor = ContextCompactor(engine = llmGateway, counter = tokenCounter)
 
     /** token 级流式转发器：生成步 → UI 增量行（压缩等内部生成期间静默）。 */
@@ -435,6 +440,12 @@ class AgentRuntime private constructor(
         }
     }
 
+    // ---- 系统提示词（#105） ----
+
+    override suspend fun systemPrompt(): String = systemPromptSwitcher.describe()
+
+    override suspend fun setSystemPrompt(text: String?): String = systemPromptSwitcher.applyChange(text)
+
     override suspend fun newSession(): String {
         if (turnMutex.isLocked) return "轮次进行中：暂不能新建会话，请等本轮结束后重试。"
         val previous = sessionStore
@@ -493,12 +504,14 @@ class AgentRuntime private constructor(
     }
 
     override suspend fun exportTrace(path: String?): String {
+        // 导出快照以当前生效提示词为准（#105）：设置页可能刚改过，先同步再组装轨迹。
+        systemPromptSwitcher.sync()
         val branch = sessionStore.activeBranch()
         val stats = traceBranchStats(branch)
         val target = traceExportPath(sessionStore.sessionId, path)
         val line = LoraTraceExporter.export(
             branch = branch,
-            options = LoraTraceExporter.Options(branchLabel = sessionStore.sessionId),
+            options = traceExportOptions(sessionStore.sessionId, systemPromptSwitcher.current),
         )
         if (line != null) {
             try {
@@ -647,6 +660,8 @@ class AgentRuntime private constructor(
     private suspend fun executeTurn(text: String) = turnMutex.withLock {
         _state.value = TerminalAgentState.RUNNING
         recorder.beginTurn()
+        // 每轮组装前同步系统提示词（#105）：终端 /system 或 Normal 设置页的修改在下一轮生效。
+        systemPromptSwitcher.sync()
         try {
             // 每轮首次生成前做上下文预检（#106）：越界先压缩，压缩后仍越界则拒绝生成，
             // 避免把注定超窗的 prompt 交给引擎（真机 3951/4096 事故的直接防线）。
@@ -922,48 +937,13 @@ class AgentRuntime private constructor(
                 source = AndroidSkillsAssetSource(appContext.assets),
                 targetDir = File(appContext.filesDir, SKILLS_DIR),
             ).release()
-            return AgentRuntime(appContext, dataStoreContextLengthStore(appContext))
+            return AgentRuntime(
+                appContext,
+                dataStoreContextLengthStore(appContext),
+                dataStoreSystemPromptStore(appContext),
+            )
         }
     }
-}
-
-/** 模型清单条目 → 终端展示条目（序号与量化对齐 UI 模型）。 */
-internal fun catalogToLocalEntries(entries: List<CatalogEntry>): List<LocalModelEntry> =
-    entries.map { LocalModelEntry(index = it.ordinal, name = it.name, quantization = it.quantization ?: "未知") }
-
-/** 拉取事件 → 终端投影。 */
-internal fun ModelPullEvent.toTerminalEvent(): TerminalPullEvent = when (this) {
-    is ModelPullEvent.Progress -> TerminalPullEvent.Progress(bytes, totalBytes, percent)
-    is ModelPullEvent.Completed -> TerminalPullEvent.Completed(modelName, resolvedPath)
-    is ModelPullEvent.Failed -> TerminalPullEvent.Failed(code, message, resumable)
-}
-
-/** 请求后端 → 引擎后端（AUTO 交给降级链）。 */
-internal fun BackendRequest.toComputeBackend(): ComputeBackend = when (this) {
-    BackendRequest.AUTO -> ComputeBackend.AUTO
-    BackendRequest.NPU -> ComputeBackend.NPU
-    BackendRequest.HYBRID -> ComputeBackend.HYBRID
-    BackendRequest.CPU -> ComputeBackend.CPU
-}
-
-/** /status 会话段：当前会话 id、节点规模、活动分支与摘要段数。 */
-internal fun sessionStatusText(
-    sessionId: String,
-    nodeCount: Int,
-    branchNodes: Int,
-    summaries: Int,
-): String = "会话：$sessionId，节点 $nodeCount，活动分支 $branchNodes 节点，摘要 $summaries 段"
-
-/** 压缩结果 → 中文回显。 */
-internal fun describeCompaction(result: CompactionResult): String = when (result) {
-    is CompactionResult.Compacted -> "已压缩上下文：${result.ranges.size} 段，约 " +
-        "${result.estimatedTokensBefore} → ${result.estimatedTokensAfter} token。"
-    is CompactionResult.Skipped -> when (result.reason) {
-        SkipReason.BELOW_THRESHOLD -> "上下文占用未达压缩阈值，本次无需压缩。"
-        SkipReason.NOTHING_TO_COMPACT -> "保护窗口之外没有可压缩节点。"
-    }
-    CompactionResult.DeferredUntilSafePoint -> "轮次进行中：压缩已排队到最近安全点。"
-    is CompactionResult.Failed -> "压缩失败：" + result.reason
 }
 
 /**

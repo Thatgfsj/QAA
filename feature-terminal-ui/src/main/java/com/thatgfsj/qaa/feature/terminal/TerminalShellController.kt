@@ -113,6 +113,8 @@ class TerminalShellController(
             is ShellEffect.ExportLogs -> query { required(it.exportLogs(effect.lines)) }
             ShellEffect.QueryContextLength -> query { required(it.contextLength()) }
             is ShellEffect.SetContextLength -> query { required(it.setContextLength(effect.tokens)) }
+            ShellEffect.QuerySystemPrompt -> query { required(it.systemPrompt()) }
+            is ShellEffect.SetSystemPrompt -> query { required(it.setSystemPrompt(effect.text)) }
             ShellEffect.QueryStatusExtra -> query(silentWhenUnwired = true) { required(it.statusExtra()) }
             is ShellEffect.SteerInstruction -> query { required(it.steer(effect.text)) }
         }

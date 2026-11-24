@@ -121,3 +121,5 @@ stateDiagram-v2
 ## 7. Agent Loop 概览
 
 单步循环：模型流式输出 → 工具调用 JSON 严格解析（容错提取 + 重试上限；另兼容 `<tool_call>` 族 XML 方言，见设计文档 4.2 第 0 级）→ 非授权确认（Allow / Deny，yoloMode 预留默认 false）→ ToolExecutor 执行 → 结果回注 → 直至无工具调用或达 maxToolSteps。工具仅 4 个原语：`read` `write` `edit` `draw_image`；System Prompt 保持极简以降低 Prefill 开销。
+
+系统提示词（#105）：持久化于 `system_prompt`（Settings DataStore），终端 `/system` 与 Normal 设置页双入口；装配层每轮 `sync()` 后替换 `PromptAssembler.systemSection`，下一轮生效、无需重载引擎；内容不变时稳定前缀字节级一致（保护 NPU Prompt Cache 命中）。

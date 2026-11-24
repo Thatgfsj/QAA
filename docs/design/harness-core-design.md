@@ -117,6 +117,8 @@ sequenceDiagram
 预算目标：第 1+2 段合计 ≤ 600 token（降低 Prefill 开销；实现期实测校准）。系统段与
 skills 段合称「稳定前缀」，在一次会话内不得包含任何动态数据，以保护 NPU Prompt Cache 命中。
 
+系统段可编辑（#105）：`system_prompt` 持久化在 Settings DataStore（与上下文长度同库），终端 `/system`（无参查看 / 文本整体替换 / `reset`）与 Normal 设置页写同一 key；`SystemPromptSwitcher` 在每轮组装、`/system` 查询与 `/export` 导出前同步，**下一轮生效、不重载引擎**。内容未变时 assemble 输出字节级一致，稳定前缀纪律与 NPU Prompt Cache 语义不变；空串/全空白等价 reset，默认值只引用 `PromptAssembler.DEFAULT_SYSTEM_PROMPT` 不复制字面量。`/export` 导出时写入当前系统提示词快照与 `systemPromptSource`（默认/自定义）标记，保证训练轨迹与推理分布对齐。
+
 ### 1.5 控制流伪代码（示意，非实现规范）
 
 ```kotlin

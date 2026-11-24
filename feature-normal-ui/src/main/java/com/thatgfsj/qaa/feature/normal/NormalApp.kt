@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.thatgfsj.qaa.core.harness.ContextWindow
+import com.thatgfsj.qaa.core.harness.PromptAssembler
 import com.thatgfsj.qaa.feature.normal.chat.ChatScreen
 import com.thatgfsj.qaa.feature.normal.chat.ChatViewModel
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
@@ -55,6 +56,8 @@ object NormalRoutes {
  * 避免 NavHost 目标页重复创建实例导致确认状态与确认门脱钩。
  * [modelPort] 为模型下载/清单端口（Issue #80）：null 时模型页保持骨架占位。
  * [contextTokens] / [onContextTokensChange] 为上下文长度设置（#106）：设置页只保存不重载。
+ * [systemPrompt] / [onSystemPromptSave] / [onSystemPromptReset] 为系统提示词设置（#105）：
+ * 与终端 /system 共用 DataStore，保存后下一轮生效。
  */
 @Composable
 fun NormalApp(
@@ -66,6 +69,9 @@ fun NormalApp(
     modelPort: NormalModelPort? = null,
     contextTokens: Int = ContextWindow.DEFAULT,
     onContextTokensChange: (Int) -> Unit = {},
+    systemPrompt: String = PromptAssembler.DEFAULT_SYSTEM_PROMPT,
+    onSystemPromptSave: (String) -> Unit = {},
+    onSystemPromptReset: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val status by statusSource.status.collectAsStateWithLifecycle()
@@ -124,6 +130,9 @@ fun NormalApp(
                     onSwitchToTerminal = onSwitchToTerminal,
                     contextTokens = contextTokens,
                     onContextTokensChange = onContextTokensChange,
+                    systemPrompt = systemPrompt,
+                    onSystemPromptSave = onSystemPromptSave,
+                    onSystemPromptReset = onSystemPromptReset,
                 )
             }
         }

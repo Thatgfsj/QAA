@@ -496,4 +496,43 @@ class TerminalShellControllerTest {
         assertTrue(port.contextLengths.isEmpty())
         assertTrue(viewModel.uiState.value.entries.last().text.contains("档位无效"))
     }
+
+    // ---- #105 /system 系统提示词路由 ----
+
+    @Test
+    fun systemCommandQueryEchoesFullPrompt() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/system")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.systemPromptText })
+    }
+
+    @Test
+    fun systemCommandWithTextForwardsWholeReplacement() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/system 你是简洁助手，只回答中文")
+        advanceUntilIdle()
+
+        assertEquals(listOf<String?>("你是简洁助手，只回答中文"), port.systemPromptSets)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.systemPromptSetText })
+    }
+
+    @Test
+    fun systemResetForwardsNullAndWorksInShellStage() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("/system reset")
+        advanceUntilIdle()
+
+        assertEquals(listOf<String?>(null), port.systemPromptSets)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.systemPromptSetText })
+    }
 }
