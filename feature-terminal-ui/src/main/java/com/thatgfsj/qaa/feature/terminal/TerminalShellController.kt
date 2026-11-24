@@ -105,6 +105,7 @@ class TerminalShellController(
             is ShellEffect.ForkNode -> query { required(it.fork(effect.nodeId)) }
             ShellEffect.CompactContext -> query { required(it.compact()) }
             ShellEffect.QuerySkills -> query { required(it.skills()) }
+            is ShellEffect.ExportTrace -> query { required(it.exportTrace(effect.path)) }
             ShellEffect.QueryStatusExtra -> query(silentWhenUnwired = true) { required(it.statusExtra()) }
             is ShellEffect.SteerInstruction -> query { required(it.steer(effect.text)) }
         }

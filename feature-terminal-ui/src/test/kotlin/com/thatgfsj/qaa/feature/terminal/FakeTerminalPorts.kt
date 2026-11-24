@@ -31,6 +31,8 @@ class FakeTerminalAgentPort(
     var forkText = "已从节点 n-000001 分叉"
     var compactText = "已压缩上下文：1 段"
     var skillsText = "技能注册表：注册 0 个"
+    var exportText = "已导出当前分支轨迹：exports/session-main.jsonl（1 行）"
+    val exportedPaths = mutableListOf<String?>()
     var statusText = "模型清单：1 项"
     var newSessionText = "已新建会话：main-2"
     var newSessionCount = 0
@@ -65,6 +67,9 @@ class FakeTerminalAgentPort(
     override suspend fun compact(): String = compactText
 
     override suspend fun skills(): String = skillsText
+
+    override suspend fun exportTrace(path: String?): String =
+        exportText.also { exportedPaths += path }
 
     override suspend fun statusExtra(): String = statusText
 

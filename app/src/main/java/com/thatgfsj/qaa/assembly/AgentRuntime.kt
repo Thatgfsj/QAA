@@ -10,6 +10,7 @@ import com.thatgfsj.qaa.core.harness.ConfirmationGate
 import com.thatgfsj.qaa.core.harness.ContextCompactor
 import com.thatgfsj.qaa.core.harness.ForkResult
 import com.thatgfsj.qaa.core.harness.JsonlTurnRecorder
+import com.thatgfsj.qaa.core.harness.LoraTraceExporter
 import com.thatgfsj.qaa.core.harness.PromptAssembler
 import com.thatgfsj.qaa.core.harness.SessionRole
 import com.thatgfsj.qaa.core.harness.SkipReason
@@ -349,6 +350,26 @@ class AgentRuntime private constructor(private val appContext: Context) :
             }
             status.skipped.forEach { appendLine("  ! ${it.directory}（${it.reason.name}）：${it.detail}") }
         }.trimEnd()
+    }
+
+    override suspend fun exportTrace(path: String?): String {
+        val branch = sessionStore.activeBranch()
+        val stats = traceBranchStats(branch)
+        val target = traceExportPath(sessionStore.sessionId, path)
+        val line = LoraTraceExporter.export(
+            branch = branch,
+            options = LoraTraceExporter.Options(branchLabel = sessionStore.sessionId),
+        )
+        if (line != null) {
+            try {
+                sandbox.writeText(target, line + "\n")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                return "导出失败：" + (error.message ?: error::class.simpleName) + "（目标：$target）"
+            }
+        }
+        return describeTraceExport(target, stats, if (line == null) 0 else 1)
     }
 
     override suspend fun statusExtra(): String {

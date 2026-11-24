@@ -367,6 +367,21 @@ class TerminalShellControllerTest {
         assertEquals(ShellStage.SESSION, shell.stage)
     }
 
+    // ---- #90 /export 轨迹导出 ----
+
+    @Test
+    fun exportCommandCarriesPathAndEchoesChineseResult() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/export exports/session-main.jsonl")
+        advanceUntilIdle()
+
+        assertEquals(listOf<String?>("exports/session-main.jsonl"), port.exportedPaths)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.exportText })
+    }
+
     // ---- #81 清屏净化 / #79 快捷键依赖的模型载入路径 ----
 
     @Test

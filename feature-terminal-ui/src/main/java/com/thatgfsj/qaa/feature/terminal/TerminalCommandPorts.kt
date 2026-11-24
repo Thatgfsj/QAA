@@ -111,6 +111,9 @@ interface TerminalAgentPort {
     /** /skills：技能注册表状态。 */
     suspend fun skills(): String
 
+    /** /export [路径]：当前分支导出为微调轨迹 JSONL，返回中文回执（行数 / 剔除统计）。 */
+    suspend fun exportTrace(path: String?): String
+
     /** /status 附加上半段之外的运行态信息（模型清单数、会话树、队列）。 */
     suspend fun statusExtra(): String
 }

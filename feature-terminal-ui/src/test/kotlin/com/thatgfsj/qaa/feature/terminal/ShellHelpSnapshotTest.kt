@@ -33,10 +33,11 @@ class ShellHelpSnapshotTest {
             "/compact",
             "/steer <指令>",
             "/skills",
+            "/export [路径]",
         )
         val text = shellHelpText()
         commands.forEach { command -> assertTrue("缺少命令：$command", text.contains(command)) }
-        assertEquals(18, rowsOf(text).size)
+        assertEquals(19, rowsOf(text).size)
     }
 
     @Test
@@ -82,6 +83,7 @@ class ShellHelpSnapshotTest {
     /compact              会话      压缩上下文
     /steer <指令>         会话      运行中干预
     /skills               会话      查看可用技能
+    /export [路径]        会话      导出当前分支轨迹
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
