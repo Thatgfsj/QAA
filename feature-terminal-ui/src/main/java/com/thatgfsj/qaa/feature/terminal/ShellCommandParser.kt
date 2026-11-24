@@ -88,21 +88,26 @@ object ShellCommandParser {
                 return usage(
                     context,
                     "chat <模型名|序号>",
-                    "CHAT 会话需要指定本地模型，例如 chat 1；输入 model 查看本地模型清单。",
+                    "CHAT 会话需要指定本地模型，例如 chat 0；输入 model 查看本地模型清单。",
                 )
             }
-            return enterSessionResult(context, mode, model = null)
+            return enterSessionResult(mode, model = null)
         }
         val model = resolveModel(modelToken, context)
             ?: return error(
                 context,
-                "未找到本地模型：$modelToken。输入 model 查看本地模型清单（名称或从 1 起的序号）。",
+                "未找到本地模型：$modelToken。输入 model 查看本地模型清单（名称或序号，内置模型为 0 号）。",
             )
-        return enterSessionResult(context, mode, model)
+        return enterSessionResult(mode, model)
     }
 
+    /**
+     * 进入会话的统一产物：先清屏再应用模式 / 模型副作用。
+     *
+     * 不追加任何系统回显——顶栏 [CHAT] / [AGENT] 承担「已进入会话」的告知职责，
+     * 首条用户输入才出现「你 &lt;」行（#81）。
+     */
     private fun enterSessionResult(
-        context: ShellContext,
         mode: TerminalMode,
         model: LocalModelEntry?,
     ): ShellParseResult {
@@ -111,15 +116,7 @@ object ShellCommandParser {
             add(ShellEffect.SetMode(mode))
             if (model != null) add(ShellEffect.SelectModel(model))
         }
-        val modelText = model?.displayText ?: context.modelInfo.displayText
-        return ShellParseResult(
-            stage = ShellStage.SESSION,
-            output = listOf(
-                "已清屏并进入 ${mode.displayTag} 会话，模型：$modelText。",
-                "直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态，输入 /help 查看会话命令。",
-            ),
-            effects = effects,
-        )
+        return ShellParseResult(stage = ShellStage.SESSION, effects = effects)
     }
 
     private fun parseStartWindow(tokens: List<String>, context: ShellContext): ShellParseResult {

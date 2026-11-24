@@ -85,7 +85,7 @@ class ShellHelpSnapshotTest {
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
-    · chat / agent 支持模型名或从 1 起的序号；输入 model 查看本地模型清单。
+    · chat / agent 支持模型名或序号（内置模型为 0 号，下载 / 导入从 1 起）；输入 model 查看本地模型清单。
     · backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。
     · /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。
     · 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。

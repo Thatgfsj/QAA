@@ -35,7 +35,7 @@ class ModelImportCoordinatorTest {
         assertTrue(text, text.contains("模型导入完成：Demo-Q4_0.gguf（Q4_0）"))
         assertTrue(text, text.contains("体积 2.0 KB（2048 字节）"))
         assertTrue(text, text.contains("路径 " + file.absolutePath))
-        assertTrue(text, text.contains("清单序号 2"))
+        assertTrue(text, text.contains("清单序号 1"))
     }
 
     @Test

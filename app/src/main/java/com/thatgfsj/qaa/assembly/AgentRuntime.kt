@@ -258,7 +258,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
     override suspend fun selectModel(token: String): String {
         ensureSdkReady()
         val entry = catalog.resolveByName(token)
-            ?: return "未找到本地模型：$token。输入 model 查看清单（名称或从 1 起的序号）。"
+            ?: return "未找到本地模型：$token。输入 model 查看清单（名称或序号，内置模型为 0 号）。"
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
         if (engine.isLoaded.value && loadedModelSource == path) return "模型已在运行：${entry.name}"
         val result = engine.load(path, LlmLoadConfig(backend = backend))
@@ -345,7 +345,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         val summaryCount = sessionStore.allNodes().count { it.role == SessionRole.SUMMARY }
         val queued = if (steerQueue.hasQueuedInput()) "有" else "无"
         return buildString {
-            appendLine("模型清单：${models.size} 项（序号从 1 起）")
+            appendLine("模型清单：${models.size} 项（内置 0 号，其余从 1 起）")
             appendLine(
                 sessionStatusText(
                     sessionId = sessionStore.sessionId,

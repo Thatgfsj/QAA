@@ -2,8 +2,13 @@ package com.thatgfsj.qaa.feature.normal.status
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,6 +44,9 @@ class FakeInferenceStatusSource : InferenceStatusSource {
 /**
  * 顶部后端状态栏（Issue #8，双前端共用同一数据源契约）。
  * 展示格式：[MODEL] 名称(量化) | [CHAT/AGENT] | [NPU/HYBRID/CPU]。
+ *
+ * 安全区：状态栏与刘海 / 挖孔区域接入 WindowInsets，圆角屏不遮挡文字；
+ * 其余 Normal 布局沿用 Scaffold 的默认行为。
  */
 @Composable
 fun BackendStatusBar(status: InferenceStatus, modifier: Modifier = Modifier) {
@@ -47,7 +55,11 @@ fun BackendStatusBar(status: InferenceStatus, modifier: Modifier = Modifier) {
         tonalElevation = 4.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                )
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
                 text = "[MODEL] ${status.modelName}(${status.quantization})",

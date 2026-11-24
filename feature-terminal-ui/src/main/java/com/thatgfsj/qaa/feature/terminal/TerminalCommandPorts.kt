@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
  * ModelPullClient 与 Agent 运行链路），保持 TUI→HAR 的模块依赖图不变、命令路由可 JVM 单测。
  */
 
-/** 模型清单端口：由 :app 用 core-inference 的 ModelCatalog 实现，序号从 1 起。 */
+/** 模型清单端口：由 :app 用 core-inference 的 ModelCatalog 实现；内置模型 0 号，下载 / 导入从 1 起。 */
 fun interface TerminalModelListPort {
     suspend fun entries(): List<LocalModelEntry>
 }

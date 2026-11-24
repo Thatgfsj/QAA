@@ -162,11 +162,17 @@ class TerminalShellController(
         }
     }
 
-    /** 选定模型后按需载入引擎（载入失败只回显原因，不改动顶栏回显）。 */
+    /**
+     * 选定模型后按需载入引擎（不改动顶栏回显）。
+     *
+     * 进入会话即清屏，成功回执不写入正文（#81）：顶栏模型段已展示当前模型；
+     * 失败回执仍然回显，避免模型文件缺失 / 载入失败被静默吞掉。
+     */
     private fun loadModel(name: String) {
         val port = agent ?: return
         scope.launch {
-            viewModel.appendOutput(port.selectModel(name))
+            val text = port.selectModel(name)
+            if (isModelLoadFailure(text)) viewModel.appendOutput(text)
         }
     }
 
@@ -253,3 +259,9 @@ class TerminalShellController(
                 if (event.resumable) "；可用相同地址重试续传。" else "；该错误重试不会推进。"
     }
 }
+
+/** 模型载入回执是否为失败：端口以中文回执返回，成功回执为「模型已载入 / 已在运行」。 */
+internal fun isModelLoadFailure(text: String): Boolean =
+    text.startsWith("模型加载失败") ||
+        text.startsWith("模型文件缺失") ||
+        text.startsWith("未找到本地模型")
