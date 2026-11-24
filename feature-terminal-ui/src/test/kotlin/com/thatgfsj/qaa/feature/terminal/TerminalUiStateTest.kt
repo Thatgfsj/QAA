@@ -38,7 +38,8 @@ class TerminalUiStateTest {
     @Test
     fun statsBarTextShowsPlaceholdersBeforeFirstToken() {
         val snapshot = TerminalMetricsSnapshot()
-        assertEquals("TTFT: -- | 速度: -- | Token: 0 / 4096", snapshot.statsBarText())
+        // #106：统计栏默认总量与 ContextWindow.DEFAULT（32768）对齐。
+        assertEquals("TTFT: -- | 速度: -- | Token: 0 / 32768", snapshot.statsBarText())
     }
 
     @Test

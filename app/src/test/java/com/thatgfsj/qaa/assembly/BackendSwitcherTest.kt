@@ -85,6 +85,24 @@ class BackendSwitcherTest {
         assertTrue(result.message.contains("没有可重载的模型"))
     }
 
+    @Test
+    fun 重载沿用当前nCtx而非默认值() = runTest {
+        // #106：切后端不得把上下文退回 LlmLoadConfig 默认 4096。
+        // 让新后端失败触发回滚，可同时验证主载与回滚两处都带上 nCtx。
+        val engine = RecordingEngine(failures = mutableListOf(RuntimeException("NPU 不可用")))
+
+        BackendSwitcher(engine).apply(
+            modelSource = "model.gguf",
+            previous = ComputeBackend.CPU,
+            request = BackendRequest.NPU,
+            nCtx = 16384,
+        )
+
+        assertEquals(listOf(16384, 16384), engine.loadConfigs.map { it.nCtx })
+        assertEquals(ComputeBackend.NPU, engine.loadConfigs.first().backend)
+        assertEquals(ComputeBackend.CPU, engine.loadConfigs.last().backend)
+    }
+
     /** 记录引擎调用序列；[failures] 按 load 顺序消费，用尽后成功。 */
     private class RecordingEngine(
         private val failures: MutableList<Throwable> = mutableListOf(),
@@ -92,6 +110,7 @@ class BackendSwitcherTest {
     ) : LlmEnginePort {
 
         val calls = mutableListOf<String>()
+        val loadConfigs = mutableListOf<LlmLoadConfig>()
         private val loaded = MutableStateFlow(initiallyLoaded)
         private val locked = MutableStateFlow(ComputeBackend.AUTO)
         private val active = MutableStateFlow<ActiveBackend?>(null)
@@ -102,6 +121,7 @@ class BackendSwitcherTest {
 
         override suspend fun load(modelSource: String, config: LlmLoadConfig): Result<Unit> {
             calls += "load:${config.backend}"
+            loadConfigs += config
             val failure = failures.removeFirstOrNull()
             if (failure != null) {
                 loaded.value = false

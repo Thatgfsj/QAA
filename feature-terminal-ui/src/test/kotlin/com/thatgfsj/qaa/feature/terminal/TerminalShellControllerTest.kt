@@ -456,4 +456,44 @@ class TerminalShellControllerTest {
         assertEquals(ShellStage.SHELL, shell.stage)
         assertEquals(ToolConfirmPolicy.ASK, viewModel.uiState.value.confirmPolicy)
     }
+
+    // ---- #106 /ctx 上下文长度路由 ----
+
+    @Test
+    fun ctxWithoutArgumentEchoesContextReceipt() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/ctx")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.contextLengthText })
+    }
+
+    @Test
+    fun ctxWithTierCarriesValueToPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/ctx 16384")
+        advanceUntilIdle()
+
+        assertEquals(listOf(16384), port.contextLengths)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.contextLengthSetText })
+    }
+
+    @Test
+    fun ctxWithInvalidTierDoesNotReachPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/ctx 5000")
+        advanceUntilIdle()
+
+        assertTrue(port.contextLengths.isEmpty())
+        assertTrue(viewModel.uiState.value.entries.last().text.contains("档位无效"))
+    }
 }

@@ -9,7 +9,10 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.thatgfsj.qaa.assembly.AgentRuntime
+import com.thatgfsj.qaa.core.harness.ContextWindow
+import com.thatgfsj.qaa.data.ContextLengthStore
 import com.thatgfsj.qaa.data.UiModeStore
+import com.thatgfsj.qaa.data.dataStoreContextLengthStore
 import com.thatgfsj.qaa.data.dataStoreUiModeStore
 import com.thatgfsj.qaa.feature.normal.NormalApp
 import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
@@ -26,6 +29,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val uiModeStore: UiModeStore by lazy { dataStoreUiModeStore(this) }
+    private val contextLengthStore: ContextLengthStore by lazy { dataStoreContextLengthStore(this) }
     private val restarter: AppRestarter by lazy { ActivityAppRestarter(this) }
     private val runtime: AgentRuntime by lazy { AgentRuntime.create(this) }
 
@@ -34,6 +38,9 @@ class MainActivity : ComponentActivity() {
         runtime.start()
         setContent {
             val mode by uiModeStore.mode.collectAsStateWithLifecycle(initialValue = null)
+            // 上下文长度设置（#106）：设置页只保存，重新载入模型（或终端 /ctx）后生效。
+            val contextTokens by contextLengthStore.tokens
+                .collectAsStateWithLifecycle(initialValue = ContextWindow.DEFAULT)
             when (val route = mode?.let(::resolveStartRoute)) {
                 StartRoute.Normal -> {
                     // 确认门在组合期绑定到运行链：工具执行前由中文对话框挂起决策。
@@ -48,6 +55,8 @@ class MainActivity : ComponentActivity() {
                         confirmGate = confirmGate,
                         agentPort = runtime,
                         modelPort = runtime,
+                        contextTokens = contextTokens,
+                        onContextTokensChange = ::saveContextLength,
                     )
                 }
                 StartRoute.Terminal -> TerminalHost(
@@ -65,6 +74,11 @@ class MainActivity : ComponentActivity() {
             uiModeStore.setMode(UiMode.TERMINAL)
             restarter.restart()
         }
+    }
+
+    /** 设置页"上下文长度"接线（#106）：只保存，不重载引擎；立即生效走终端 /ctx。 */
+    private fun saveContextLength(tokens: Int) {
+        lifecycleScope.launch { contextLengthStore.setTokens(tokens) }
     }
 
     /** 终端 `start window` 接线：写 ui_mode = NORMAL → 立即重启回正常窗口。 */

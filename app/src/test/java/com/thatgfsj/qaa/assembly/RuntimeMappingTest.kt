@@ -3,6 +3,7 @@ package com.thatgfsj.qaa.assembly
 import com.thatgfsj.qaa.core.harness.CompactionResult
 import com.thatgfsj.qaa.core.harness.CompactionTrigger
 import com.thatgfsj.qaa.core.harness.CompactedRange
+import com.thatgfsj.qaa.core.harness.ContextWindow
 import com.thatgfsj.qaa.core.harness.SkipReason
 import com.thatgfsj.qaa.core.inference.CatalogEntry
 import com.thatgfsj.qaa.core.inference.ComputeBackend
@@ -27,7 +28,9 @@ class RuntimeMappingTest {
         )
         assertEquals("models", AgentRuntime.MODELS_DIR)
         assertEquals("skills", AgentRuntime.SKILLS_DIR)
-        assertEquals(3072, AgentRuntime.CONTEXT_BUDGET)
+        // #106：预算改为按 nCtx 派生（ContextWindow.promptBudget），旧常量 CONTEXT_BUDGET 已删除。
+        assertEquals(32768, ContextWindow.DEFAULT)
+        assertEquals(3456, ContextWindow.budgetFor(4096))
     }
 
     @Test

@@ -480,4 +480,47 @@ class ShellCommandParserTest {
         assertTrue(result.effects.isEmpty())
         assertTrue(result.text().contains("未知会话命令：/foo"))
     }
+
+    // ---- #106 /ctx 上下文长度 ----
+
+    @Test
+    fun ctxWithoutArgumentQueriesInBothStages() {
+        val sessionResult = parse("/ctx", session)
+        assertEquals(listOf(ShellEffect.QueryContextLength), sessionResult.effects)
+        assertTrue(sessionResult.output.isEmpty())
+        assertEquals(listOf(ShellEffect.QueryContextLength), parse("/ctx", shell).effects)
+    }
+
+    @Test
+    fun ctxAcceptsFourTiersInBothStages() {
+        listOf(4096, 8192, 16384, 32768).forEach { tier ->
+            assertEquals(
+                "档位 $tier",
+                listOf(ShellEffect.SetContextLength(tier)),
+                parse("/ctx $tier", session).effects,
+            )
+        }
+        assertEquals(listOf(ShellEffect.SetContextLength(8192)), parse("/ctx 8192", shell).effects)
+    }
+
+    @Test
+    fun ctxRejectsValuesOutsideTiers() {
+        listOf("/ctx 3072", "/ctx 65536", "/ctx abc", "/ctx -1").forEach { input ->
+            val result = parse(input, session)
+            assertTrue("$input 应被拒绝", result.effects.isEmpty())
+            assertTrue(result.text().contains("档位无效"))
+            assertTrue(result.text().contains("4096、8192、16384、32768"))
+        }
+    }
+
+    @Test
+    fun ctxRejectsExtraArguments() {
+        assertTrue(parse("/ctx 4096 8192", session).text().contains("用法：/ctx [档位]"))
+    }
+
+    @Test
+    fun ctxIsListedInUnknownSessionCommandHint() {
+        val text = parse("/foo", session).text()
+        assertTrue(text.contains("/ctx"))
+    }
 }

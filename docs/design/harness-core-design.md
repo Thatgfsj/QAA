@@ -445,8 +445,11 @@ meta 记录（activeLeafId 为当前活动分支叶子，读端取最后一条�
   上下文真实占用；completionTokens 仅累计入会话统计。
 - 估算兜底：引擎未返回时按字符近似（ASCII ≈ 4 字符/token，CJK ≈ 1 字/token），取
   max(实测, 估算) 防低估。
-- 预算：contextBudget = 模型上下文窗口 − 输出预留（建议 1024）− 系统段固定开销；
-  usedRatio = usedTokens / contextBudget。
+- 预算（#106）：promptBudget = nCtx − 输出预留 maxTokens(512) − 安全边界 max(128, ceil(0.02·nCtx))；
+  4096→3456、8192→7516、16384→15544、32768→31600（默认档 32768）；usedRatio = usedTokens / promptBudget。
+- 口径统一：used 优先引擎实测 promptTokens，估算兜底且必须含稳定前缀（系统段 + skills 段，见 1.4）；压缩回执、/status 与统计栏同口径；触发/目标水位 0.8 / 0.5。
+- 上下文长度设置（#106）：DataStore 持久化，终端 `/ctx [档位]` 与 Normal 设置页只写同一 key；≤8192 且模型已加载即时重载、>8192 只保存；载入失败（Result.failure）自动回退 4096 并在状态栏/回执提示。
+- 生成前预检（preflight）：本轮首次生成前若 实测 prompt + 估算新输入 + 输出预留 > nCtx，先触发压缩；压缩后仍越界则不生成并回显「上下文不足：请 /new 或 /compact」，避免原 3951/4096 事故。
 
 ### 6.2 触发机制
 

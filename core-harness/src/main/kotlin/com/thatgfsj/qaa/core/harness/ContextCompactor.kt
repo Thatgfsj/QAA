@@ -59,25 +59,40 @@ class ContextCompactor(
         return CompactedView(history = toTurnNodes(kept), summaries = summaries)
     }
 
-    /** 按当前视图估算摘要段 + 历史段的 token 占用。 */
-    fun estimateContextTokens(store: TreeSessionStore, leafId: String? = null): Int =
-        view(store, leafId).estimatedTokens(counter)
+    /**
+     * 按当前视图估算摘要段 + 历史段的 token 占用。
+     *
+     * [prefixTokens] 为 PromptAssembler 稳定前缀（system + skills 段）的 token 数（#106）：
+     * 视图估算不含前缀，压缩判定与回执需加上它才能与真实 prompt 同口径；默认 0 保持既有行为。
+     */
+    fun estimateContextTokens(
+        store: TreeSessionStore,
+        leafId: String? = null,
+        prefixTokens: Int = 0,
+    ): Int = prefixTokens.coerceAtLeast(0) + view(store, leafId).estimatedTokens(counter)
 
     /** 汇总实测与估算占用；[measuredPromptTokens] 为空时完全依赖估算。 */
     fun usage(
         store: TreeSessionStore,
         measuredPromptTokens: Int? = null,
         leafId: String? = null,
+        prefixTokens: Int = 0,
     ): ContextUsage = ContextUsage(
         measuredPromptTokens = measuredPromptTokens?.coerceAtLeast(0),
-        estimatedTokens = estimateContextTokens(store, leafId),
+        estimatedTokens = estimateContextTokens(store, leafId, prefixTokens),
     )
 
     /** /compact 手动入口：语义与 [compact] 相同，但跳过阈值判定。 */
     suspend fun compactManually(
         store: TreeSessionStore,
         contextBudget: Int,
-    ): CompactionResult = compact(store, contextBudget, trigger = CompactionTrigger.MANUAL)
+        prefixTokens: Int = 0,
+    ): CompactionResult = compact(
+        store = store,
+        contextBudget = contextBudget,
+        trigger = CompactionTrigger.MANUAL,
+        prefixTokens = prefixTokens,
+    )
 
     /**
      * 执行一次压缩。
@@ -85,19 +100,21 @@ class ContextCompactor(
      * [usedTokens] 为上游实测的上下文占用（如最近一次生成的 promptTokens），为空时
      * 按 store 估算；自动触发取实测与估算的较大者，避免任一来源低估。自动触发仅在
      * 达到阈值时执行，手动触发忽略阈值。[contextBudget] 为模型上下文窗口扣除输出
-     * 预留与系统段固定开销后的预算。
+     * 预留与系统段固定开销后的预算。[prefixTokens] 为稳定前缀 token 数，回执 before/after
+     * 与判定使用同一口径（#106）。
      */
     suspend fun compact(
         store: TreeSessionStore,
         contextBudget: Int,
         usedTokens: Int? = null,
         trigger: CompactionTrigger = CompactionTrigger.AUTO,
+        prefixTokens: Int = 0,
     ): CompactionResult {
         require(contextBudget > 0) { "contextBudget 必须为正数" }
         if (trigger == CompactionTrigger.MANUAL && store.isTurnActive) {
             return CompactionResult.DeferredUntilSafePoint
         }
-        val before = estimateContextTokens(store)
+        val before = estimateContextTokens(store, prefixTokens = prefixTokens)
         val used = maxOf(usedTokens ?: 0, before)
         if (trigger == CompactionTrigger.AUTO && !shouldCompact(used, contextBudget)) {
             return CompactionResult.Skipped(SkipReason.BELOW_THRESHOLD)
@@ -139,7 +156,7 @@ class ContextCompactor(
                 nodeCount = plan.end - plan.start + 1,
                 estimatedTokens = node.compaction?.estimatedTokens ?: 0L,
             )
-            after = estimateContextTokens(store)
+            after = estimateContextTokens(store, prefixTokens = prefixTokens)
             if (!exceedsWatermark(after, contextBudget)) break
         }
         if (ranges.isEmpty()) {

@@ -26,13 +26,16 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * [telemetryEnabled] 供装配层在压缩摘要生成等内部调用期间关闭统计栏刷新与实测占用记录，
  * 避免内部生成污染用户可见指标。
+ *
+ * [contextTokens] 为 nCtx 回退值提供者（#106）：引擎指标未携带 nCtx 时按当前用户设置回显，
+ * 正常路径下 [InferenceMetrics.nCtx] 直接决定统计栏总量。
  */
 class LlmGatewayAdapter(
     private val engine: LlmEnginePort,
-    private val contextTokens: Int = DEFAULT_CONTEXT_TOKENS,
+    private val contextTokens: () -> Int = { DEFAULT_CONTEXT_TOKENS },
 ) : LlmEngineGateway {
 
-    private val _metrics = MutableStateFlow(TerminalMetricsSnapshot(contextTokens = contextTokens))
+    private val _metrics = MutableStateFlow(TerminalMetricsSnapshot(contextTokens = contextTokens()))
 
     /** 统计栏指标流（与 TerminalMetricsSnapshot 同形，UI 层零改动接入）。 */
     val metrics: StateFlow<TerminalMetricsSnapshot> = _metrics.asStateFlow()
@@ -65,7 +68,7 @@ class LlmGatewayAdapter(
         val measured = completed
         if (measured != null && telemetryEnabled) {
             lastPromptTokens = measured.promptTokens.toInt()
-            _metrics.value = measured.toTerminalSnapshot(contextTokens)
+            _metrics.value = measured.toTerminalSnapshot(contextTokens())
         }
         return GenerationOutput(
             text = builder.toString(),
