@@ -2,6 +2,17 @@
 
 本文件记录面向用户的版本级变更；单次合入的明细见对应 Issue 与 Pull Request。
 
+## v0.1.1（体验打磨）
+
+真机首用反馈修正（#78–#83）：
+
+- 顶栏与底部适配手机圆角/安全区（safeDrawing：状态栏/刘海/手势条不再遮挡内容）
+- 终端快捷键真实化：↑/↓ 输入历史翻阅、yes/no 一键 Allow/Deny（无挂起时中文引导）
+- `chat` 进入会话清屏净化：零系统回显、纯空态直达输入
+- 内置冒烟模型固定 0 号基准，下载/导入模型自 1 起
+- Normal 模型管理页新增下载入口：URL 一键断点续传，退出 App 状态保留、重进可继续
+- 文案统一："极客终端模式"更名为"终端模式"
+
 ## v0.1.0（发布候选）
 
 首个功能完备版本：端到端 Agent 循环全链路可用（冒烟模型内置，安装即运行）。
@@ -28,7 +39,7 @@
 - ModelMemoryCoordinator 六状态互斥状态机：严禁 LLM 与画图模型同时驻留内存
 
 ### 双前端（:app + :feature-*）
-- Normal 窗口（会话/模型管理/设置）与 Terminal 极客终端（三段式布局 + 实时统计栏）
+- Normal 窗口（会话/模型管理/设置）与 Terminal 终端模式（三段式布局 + 实时统计栏）
 - ui_mode 持久化路由，切换即重启生效（设置页 / start window）
 - Terminal 全中文命令集：help / model / chat / agent / backend / clear / start window / /exit / /status / /tree / /fork / /compact / /steer / /skills / /new
 - backend 锁定即时生效（已加载时自动卸载重载，失败回滚旧后端）；/new 新建会话（自增 id、旧会话文件保留）

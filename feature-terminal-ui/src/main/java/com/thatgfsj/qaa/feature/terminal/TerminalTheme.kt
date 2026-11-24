@@ -41,7 +41,7 @@ object TerminalColors {
     val HintText = Color(0xFF8A8A8A)
 }
 
-/** 终端主题：固定暗色，不随系统切换（极客终端契约）。 */
+/** 终端主题：固定暗色，不随系统切换（终端模式契约）。 */
 @Composable
 fun TerminalTheme(content: @Composable () -> Unit) {
     MaterialTheme(

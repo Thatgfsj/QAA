@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 /**
  * 设置页（Issue #8）。
  *
- * 硬约束："切换至极客终端模式"仅暴露 [onSwitchToTerminal] 回调占位；
+ * 硬约束："切换至终端模式"仅暴露 [onSwitchToTerminal] 回调占位；
  * ui_mode 持久化写入与切换即立即重启 App 属 Issue #7，本期严禁实现。
  */
 @Composable
@@ -35,7 +35,7 @@ fun SettingsScreen(onSwitchToTerminal: () -> Unit) {
         GroupTitle("前端模式")
         Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
             Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("极客终端模式", style = MaterialTheme.typography.titleMedium)
+                Text("终端模式", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "三段式 Shell 终端视图，适合键盘操作与快速调参。",
@@ -43,7 +43,7 @@ fun SettingsScreen(onSwitchToTerminal: () -> Unit) {
                 )
                 Spacer(Modifier.height(12.dp))
                 Button(onClick = onSwitchToTerminal, modifier = Modifier.fillMaxWidth()) {
-                    Text("切换至极客终端模式")
+                    Text("切换至终端模式")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(

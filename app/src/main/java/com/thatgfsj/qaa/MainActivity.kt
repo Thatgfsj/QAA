@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 设置页"切换至极客终端模式"接线：写 ui_mode → 立即重启。 */
+    /** 设置页"切换至终端模式"接线：写 ui_mode → 立即重启。 */
     private fun switchToTerminal() {
         lifecycleScope.launch {
             uiModeStore.setMode(UiMode.TERMINAL)
