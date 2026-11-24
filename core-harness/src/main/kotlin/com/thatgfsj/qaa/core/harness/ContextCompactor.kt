@@ -13,6 +13,10 @@ import kotlinx.coroutines.CancellationException
  * 摘要范围用链段端点引用（coveredFrom/coveredTo）：从 coveredTo 沿 parentId 回溯到
  * coveredFrom（含两端）的节点视为已压缩，原节点不删除。分叉后新分支若不包含该
  * summary 节点，范围引用自然失效，新旧分支互不影响。
+ *
+ * 多轮压缩遵循“替换而非叠加”（#100）：新的压缩范围可以吸收既有 summary 节点，其内容经
+ * “已有摘要”段并入新摘要，被吸收的旧摘要随即从视图中消失；若估算本次压缩无收益（摘要
+ * 开销不低于被覆盖内容），则不改树并返回 [SkipReason.NOT_WORTHWHILE]。
  */
 class ContextCompactor(
     private val engine: LlmEngineGateway,
@@ -50,8 +54,12 @@ class ContextCompactor(
         // branchTo(null) 会返回空链（显式空参不触发默认值），这里显式分流。
         val chain = if (leafId == null) store.branchTo() else store.branchTo(leafId)
         val covered = resolveCoverage(chain)
+        // 被新摘要范围吸收的旧摘要不再前置（替换语义）：否则多轮压缩会把摘要层层叠加，
+        // 压后 token 反而比压前更大（#100）。
         val summaries = chain
-            .filter { it.role == SessionRole.SUMMARY }
+            .filterIndexed { index, node ->
+                node.role == SessionRole.SUMMARY && index !in covered
+            }
             .map { it.content }
         val kept = chain.filterIndexed { index, node ->
             node.role != SessionRole.SUMMARY && index !in covered
@@ -99,9 +107,10 @@ class ContextCompactor(
      *
      * [usedTokens] 为上游实测的上下文占用（如最近一次生成的 promptTokens），为空时
      * 按 store 估算；自动触发取实测与估算的较大者，避免任一来源低估。自动触发仅在
-     * 达到阈值时执行，手动触发忽略阈值。[contextBudget] 为模型上下文窗口扣除输出
-     * 预留与系统段固定开销后的预算。[prefixTokens] 为稳定前缀 token 数，回执 before/after
-     * 与判定使用同一口径（#106）。
+     * 达到阈值时执行；手动触发忽略阈值，但占用已不高于目标水位时返回
+     * [SkipReason.ALREADY_BELOW_TARGET] 且不改树（#100）。[contextBudget] 为模型上下文
+     * 窗口扣除输出预留与系统段固定开销后的预算。[prefixTokens] 为稳定前缀 token 数，
+     * 回执 before/after 与判定使用同一口径（#106）。
      */
     suspend fun compact(
         store: TreeSessionStore,
@@ -116,15 +125,35 @@ class ContextCompactor(
         }
         val before = estimateContextTokens(store, prefixTokens = prefixTokens)
         val used = maxOf(usedTokens ?: 0, before)
+        val target = targetTokens(contextBudget)
         if (trigger == CompactionTrigger.AUTO && !shouldCompact(used, contextBudget)) {
-            return CompactionResult.Skipped(SkipReason.BELOW_THRESHOLD)
+            return CompactionResult.Skipped(
+                reason = SkipReason.BELOW_THRESHOLD,
+                currentTokens = before,
+                contextBudget = contextBudget,
+                targetTokens = target,
+            )
+        }
+        // 手动入口只在确有收益时动手：占用已不高于目标水位时，再压一次只是用摘要开销
+        // 换掉少量历史，回执就会出现“压后比压前更大”（#100）。
+        if (trigger == CompactionTrigger.MANUAL && before <= target) {
+            return CompactionResult.Skipped(
+                reason = SkipReason.ALREADY_BELOW_TARGET,
+                currentTokens = before,
+                contextBudget = contextBudget,
+                targetTokens = target,
+            )
         }
 
         val ranges = mutableListOf<CompactedRange>()
         var after = before
+        var summaryChars = 0
+        var replacedSummaries = 0
+        var sawPlan = false
         while (ranges.size < maxPasses) {
             val chain = store.branchTo()
             val plan = planCompaction(chain) ?: break
+            sawPlan = true
             val covered = chain.subList(plan.start, plan.end + 1)
             val summaryText = try {
                 requestSummary(chain, covered)
@@ -138,6 +167,11 @@ class ContextCompactor(
             if (summaryText.isBlank()) {
                 return CompactionResult.Failed("摘要生成返回空内容")
             }
+            // 先估算“替换后”的占用：摘要开销不低于将被覆盖的内容时不写树，保证
+            // estimatedTokensAfter ≤ estimatedTokensBefore，连续压缩不会越压越大（#100）。
+            val removedTokens = messageTokens(covered.map { it.content })
+            val summaryTokens = messageTokens(listOf(summaryText))
+            if (summaryTokens >= removedTokens) break
             val node = store.append(
                 role = SessionRole.SUMMARY,
                 content = summaryText,
@@ -156,11 +190,18 @@ class ContextCompactor(
                 nodeCount = plan.end - plan.start + 1,
                 estimatedTokens = node.compaction?.estimatedTokens ?: 0L,
             )
+            summaryChars += summaryText.length
+            replacedSummaries += covered.count { it.role == SessionRole.SUMMARY }
             after = estimateContextTokens(store, prefixTokens = prefixTokens)
             if (!exceedsWatermark(after, contextBudget)) break
         }
         if (ranges.isEmpty()) {
-            return CompactionResult.Skipped(SkipReason.NOTHING_TO_COMPACT)
+            return CompactionResult.Skipped(
+                reason = if (sawPlan) SkipReason.NOT_WORTHWHILE else SkipReason.NOTHING_TO_COMPACT,
+                currentTokens = before,
+                contextBudget = contextBudget,
+                targetTokens = target,
+            )
         }
         val ratio = after.toFloat() / contextBudget.toFloat()
         return CompactionResult.Compacted(
@@ -170,37 +211,45 @@ class ContextCompactor(
             estimatedTokensAfter = after,
             postWatermarkRatio = ratio,
             watermarkSatisfied = ratio <= targetWatermarkRatio,
+            retainedNodeCount = view(store).history.size,
+            summaryChars = summaryChars,
+            replacedSummaryCount = replacedSummaries,
         )
     }
 
     /**
-     * 规划本次可压缩的连续链段：从已覆盖范围之后开始，到保护窗口或既有摘要节点之前。
+     * 规划本次可压缩的连续链段：从已覆盖范围之后开始，到保护窗口之前。
      *
-     * 既有摘要节点是压缩边界而非输入：跨过它就需要把历史摘要展开后再摘要一遍，
-     * 违背“历史摘要不重复展开”；多轮压缩会逐段推进，不会因此长期停滞。
+     * 既有摘要节点允许被并入本次范围（替换语义）：其内容经 requestSummary 的“已有摘要”
+     * 段衔接进新摘要，覆盖后旧摘要从视图消失；否则连续压缩会不断新增摘要节点，压后
+     * token 反而变大（#100）。范围必须至少含一个非摘要节点，避免只重写摘要而无收益。
      */
     private fun planCompaction(chain: List<SessionNode>): CompactionPlan? {
         if (chain.isEmpty()) return null
         val covered = resolveCoverage(chain)
         val protected = protectedIndices(chain)
         var start = (covered.maxOrNull() ?: -1) + 1
-        while (start < chain.size && (chain[start].role == SessionRole.SUMMARY || start in protected)) {
+        while (start < chain.size && start in protected) {
             start++
         }
         if (start >= chain.size) return null
         var end = start - 1
         var index = start
-        while (index < chain.size && index !in protected && chain[index].role != SessionRole.SUMMARY) {
+        var historyNodes = 0
+        while (index < chain.size && index !in protected) {
+            if (chain[index].role != SessionRole.SUMMARY) historyNodes++
             end = index
             index++
         }
-        if (end < start) return null
+        if (end < start || historyNodes == 0) return null
         return CompactionPlan(start = start, end = end)
     }
 
     /**
      * 保护窗口索引（设计文档 6.3）：最近两个 user 轮次（当前轮全部 + 上一轮全部，
-     * 是“上一轮 user/assistant 文本”的超集）、最新一条工具输出、既有 summary 节点。
+     * 是“上一轮 user/assistant 文本”的超集）与最新一条工具输出。
+     *
+     * 既有 summary 节点不在此列：它由 [planCompaction] 按替换语义并入下一次压缩（#100）。
      */
     private fun protectedIndices(chain: List<SessionNode>): Set<Int> {
         val protected = HashSet<Int>()
@@ -213,9 +262,6 @@ class ContextCompactor(
         for (index in protectedStart until chain.size) protected += index
         val lastTool = chain.indexOfLast { it.role == SessionRole.TOOL }
         if (lastTool >= 0) protected += lastTool
-        chain.forEachIndexed { index, node ->
-            if (node.role == SessionRole.SUMMARY) protected += index
-        }
         return protected
     }
 
@@ -267,8 +313,10 @@ class ContextCompactor(
         chain: List<SessionNode>,
         covered: List<SessionNode>,
     ): String {
+        // 被本次范围吸收的旧摘要走“待压缩历史”的 [摘要] 段，这里不再重复拼接。
+        val coveredIds = covered.mapTo(HashSet()) { it.id }
         val priorSummaries = chain
-            .filter { it.role == SessionRole.SUMMARY }
+            .filter { it.role == SessionRole.SUMMARY && it.id !in coveredIds }
             .map { it.content }
         val messages = listOf(
             PromptMessage(PromptRole.SYSTEM, SUMMARY_PROMPT),
@@ -320,6 +368,18 @@ class ContextCompactor(
 
     private fun exceedsWatermark(tokens: Int, contextBudget: Int): Boolean =
         tokens.toFloat() / contextBudget.toFloat() > targetWatermarkRatio
+
+    /** 目标水位 token 数：压缩后占用应不高于该值（0.5·预算，设计文档 6.4）。 */
+    private fun targetTokens(contextBudget: Int): Int =
+        (contextBudget * targetWatermarkRatio).toInt().coerceAtLeast(1)
+
+    /**
+     * 按 [CompactedView.messages] 的口径估算一组正文的 token 数（角色不影响计数）。
+     * 用于在写树之前复算“去掉覆盖内容 + 加入新摘要”的压后占用。
+     */
+    private fun messageTokens(contents: List<String>): Int = counter.countMessages(
+        contents.map { PromptMessage(PromptRole.SYSTEM, it) }
+    )
 
     /** 活动分支节点转 [TurnNode] 视图（与 [TreeSessionStore.snapshot] 的字段映射一致）。 */
     private fun toTurnNodes(nodes: List<SessionNode>): List<TurnNode> {

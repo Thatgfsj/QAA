@@ -5,6 +5,7 @@ import android.net.Uri
 import com.thatgfsj.qaa.core.harness.AgentConfig
 import com.thatgfsj.qaa.core.harness.AgentLoop
 import com.thatgfsj.qaa.core.harness.CompactionResult
+import com.thatgfsj.qaa.core.harness.CompactionTrigger
 import com.thatgfsj.qaa.core.harness.ConfirmationDecision
 import com.thatgfsj.qaa.core.harness.ConfirmationGate
 import com.thatgfsj.qaa.core.harness.ContextCompactor
@@ -604,6 +605,16 @@ class AgentRuntime private constructor(
                     setting = contextLengthSetting,
                     engine = effectiveContextTokens(),
                     budget = currentBudget(),
+                ),
+            )
+            appendLine(
+                describeContextUsage(
+                    estimatedTokens = compactor.estimateContextTokens(
+                        store = sessionStore,
+                        prefixTokens = stablePrefixTokens,
+                    ),
+                    contextBudget = currentBudget(),
+                    lastPromptTokens = llmGateway.lastPromptTokens,
                 ),
             )
             lastContextFallbackText?.let { appendLine(it) }
