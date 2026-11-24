@@ -3,7 +3,6 @@ package com.thatgfsj.qaa.feature.terminal
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,7 +21,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -39,7 +37,7 @@ private val FollowBottomThreshold = 48.dp
 /**
  * 中部滚动区（Issue #9）：「你 &lt; 」/「AI &lt; 」前缀流式对话 + [TOOL] 确认区。
  *
- * - 等宽字体、黑底浅字；空会话时展示居中占位文案；
+ * - 等宽字体、黑底浅字；空会话保持干净空态（不写占位文案）；
  * - followOutput=true 时自动滚动跟随流式输出；用户上滑离开底部自动暂停跟随，
  *   滑回底部自动恢复（经 [onFollowChanged] 上报，逻辑可 JVM 单测）；
  * - [TOOL] 确认区出现在对话末尾：Pending 展示 Allow / Deny 按钮（回调预留，
@@ -71,37 +69,24 @@ fun TerminalConversation(
         }
     }
 
-    Box(
+    LazyColumn(
+        state = listState,
         modifier = modifier
             .fillMaxSize()
             .background(TerminalColors.Background),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            items(state.entries, key = { it.id }) { entry ->
-                TerminalEntryRow(entry)
-            }
-            when (val tool = state.toolConfirm) {
-                ToolConfirmState.Idle -> Unit
-                is ToolConfirmState.Pending -> item(key = "tool-${tool.requestId}") {
-                    PendingToolRow(tool, onToolAllow, onToolDeny)
-                }
-                is ToolConfirmState.Resolved -> item(key = "tool-${tool.requestId}") {
-                    ResolvedToolRow(tool)
-                }
-            }
+        items(state.entries, key = { it.id }) { entry ->
+            TerminalEntryRow(entry)
         }
-        if (state.entries.isEmpty() && state.toolConfirm is ToolConfirmState.Idle) {
-            Text(
-                text = "会话为空，等待输入…",
-                color = TerminalColors.TextPrimary.copy(alpha = 0.45f),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                modifier = Modifier.align(Alignment.Center),
-            )
+        when (val tool = state.toolConfirm) {
+            ToolConfirmState.Idle -> Unit
+            is ToolConfirmState.Pending -> item(key = "tool-${tool.requestId}") {
+                PendingToolRow(tool, onToolAllow, onToolDeny)
+            }
+            is ToolConfirmState.Resolved -> item(key = "tool-${tool.requestId}") {
+                ResolvedToolRow(tool)
+            }
         }
     }
 }

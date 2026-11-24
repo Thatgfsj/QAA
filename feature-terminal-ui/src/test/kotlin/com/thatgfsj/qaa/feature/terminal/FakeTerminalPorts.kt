@@ -43,8 +43,11 @@ class FakeTerminalAgentPort(
     override suspend fun lockBackend(request: BackendRequest): String =
         "已锁定请求后端：${request.displayName}".also { backends += request }
 
+    /** 非空时覆盖 selectModel 回执（用于失败回显与静默路径测试）。 */
+    var selectModelText: String? = null
+
     override suspend fun selectModel(token: String): String =
-        "模型已载入：$token".also { selectedModels += token }
+        (selectModelText ?: "模型已载入：$token").also { selectedModels += token }
 
     override suspend fun tree(): String = treeText
 

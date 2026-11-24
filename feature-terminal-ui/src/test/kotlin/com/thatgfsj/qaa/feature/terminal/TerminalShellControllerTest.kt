@@ -73,13 +73,13 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         viewModel.onAiChunk("旧会话内容")
         val shell = controller(viewModel)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         val state = viewModel.uiState.value
         assertEquals(TerminalMode.CHAT, state.mode)
         assertEquals(LocalModelCatalog.SMOKE_MODEL_NAME, state.modelInfo.name)
         assertEquals(ShellStage.SESSION, shell.stage)
-        assertFalse(state.entries.any { it.text == "旧会话内容" })
-        assertTrue(state.entries.any { it.text.contains("CHAT 会话") })
+        // 清屏即干净空态：无「进入会话」类系统回显，顶栏承担模式告知。
+        assertTrue(state.entries.isEmpty())
     }
 
     @Test
@@ -96,7 +96,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         var forwarded: Pair<String, TerminalMode>? = null
         val shell = controller(viewModel, onPrompt = { text, mode -> forwarded = text to mode })
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("你好，骁龙")
         assertEquals("你好，骁龙" to TerminalMode.CHAT, forwarded)
         val entries = viewModel.uiState.value.entries
@@ -107,7 +107,7 @@ class TerminalShellControllerTest {
     fun promptNoticeIsShownOnlyOncePerSession() {
         val viewModel = TerminalViewModel()
         val shell = controller(viewModel)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("第一句")
         shell.onInput("第二句")
         val notices = viewModel.uiState.value.entries.count { it.text == TerminalShellController.UNWIRED_NOTICE }
@@ -119,7 +119,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         var prompts = 0
         val shell = controller(viewModel, onPrompt = { _, _ -> prompts += 1 })
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("/exit")
         assertEquals(ShellStage.SHELL, shell.stage)
         shell.onInput("你好")
@@ -210,7 +210,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("帮我读一下 README")
         advanceUntilIdle()
         assertEquals(listOf("帮我读一下 README"), port.turns)
@@ -221,7 +221,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort(initial = TerminalAgentState.RUNNING)
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("补充一句")
         advanceUntilIdle()
         assertEquals(listOf("补充一句"), port.followUps)
@@ -234,7 +234,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("/tree")
         advanceUntilIdle()
         assertTrue(viewModel.uiState.value.entries.any { it.text == port.treeText })
@@ -245,7 +245,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("/compact")
         shell.onInput("/skills")
         shell.onInput("/status")
@@ -261,7 +261,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("/fork n-000042")
         advanceUntilIdle()
         assertTrue(viewModel.uiState.value.entries.any { it.text.contains("n-000042") })
@@ -272,7 +272,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort(initial = TerminalAgentState.RUNNING)
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         shell.onInput("/steer 先解释再说")
         advanceUntilIdle()
         assertEquals(listOf("先解释再说"), port.steers)
@@ -283,15 +283,15 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val models = listOf(
-            LocalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0"),
-            LocalModelEntry(2, "Qwen3-4B", "Q4_K_M"),
+            LocalModelEntry(0, "Supra2.5-Pro-Instruct", "Q4_0"),
+            LocalModelEntry(1, "Qwen3-4B", "Q4_K_M"),
         )
         val shell = controller(viewModel, agent = port, modelList = FakeTerminalModelList(models), scope = this)
         advanceUntilIdle()
         shell.onInput("model")
         val listText = viewModel.uiState.value.entries.last().text
-        assertTrue(listText.contains("2. Qwen3-4B(Q4_K_M)"))
-        shell.onInput("chat 2")
+        assertTrue(listText.contains("1. Qwen3-4B(Q4_K_M)"))
+        shell.onInput("chat 1")
         advanceUntilIdle()
         assertEquals("Qwen3-4B(Q4_K_M)", viewModel.uiState.value.modelInfo.displayText)
         assertEquals(listOf("Qwen3-4B"), port.selectedModels)
@@ -355,7 +355,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 1")
+        shell.onInput("chat 0")
         advanceUntilIdle()
         viewModel.appendOutput("旧会话内容")
         shell.onInput("/new")
@@ -365,5 +365,37 @@ class TerminalShellControllerTest {
         assertFalse(texts.any { it == "旧会话内容" })
         assertTrue(texts.single().contains(port.newSessionText))
         assertEquals(ShellStage.SESSION, shell.stage)
+    }
+
+    // ---- #81 清屏净化 / #79 快捷键依赖的模型载入路径 ----
+
+    @Test
+    fun chatEntryKeepsConversationEmptyAndFirstInputCreatesUserLine() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.entries.isEmpty())
+        assertEquals(listOf(LocalModelCatalog.SMOKE_MODEL_NAME), port.selectedModels)
+
+        shell.onInput("你好，骁龙")
+        advanceUntilIdle()
+        val entries = viewModel.uiState.value.entries
+        assertEquals(1, entries.size)
+        assertEquals(TerminalRole.USER, entries.single().role)
+        assertEquals("你好，骁龙", entries.single().text)
+    }
+
+    @Test
+    fun modelLoadFailureOnEntryIsEchoed() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort().apply { selectModelText = "模型加载失败：解码器不兼容" }
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        advanceUntilIdle()
+        val entries = viewModel.uiState.value.entries
+        assertEquals(1, entries.size)
+        assertTrue(entries.single().text.contains("模型加载失败"))
     }
 }

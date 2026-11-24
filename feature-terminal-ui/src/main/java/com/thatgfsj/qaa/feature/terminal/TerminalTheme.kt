@@ -37,7 +37,7 @@ object TerminalColors {
     /** 分段竖线与次级提示。 */
     val BarDividerText = Color(0xFF6A6A6A)
 
-    /** 快捷键占位提示。 */
+    /** 快捷键按钮描边与次级提示。 */
     val HintText = Color(0xFF8A8A8A)
 }
 

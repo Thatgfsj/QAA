@@ -59,7 +59,7 @@ class ShellCommandParserTest {
     @Test
     fun commandTokensAreCaseInsensitiveAndWhitespaceTolerant() {
         assertTrue(parse("  MODEL  ").text().contains("本地模型清单"))
-        assertEquals(ShellStage.SESSION, parse("  CHAT 1  ").stage)
+        assertEquals(ShellStage.SESSION, parse("  CHAT 0  ").stage)
     }
 
     // ---- model ----
@@ -67,7 +67,7 @@ class ShellCommandParserTest {
     @Test
     fun modelListsBuiltInSmokeModel() {
         val text = parse("model").text()
-        assertTrue(text.contains("1. Supra2.5-Pro-Instruct(Q4_0)"))
+        assertTrue(text.contains("0. Supra2.5-Pro-Instruct(Q4_0)"))
         assertTrue(text.contains("当前模型：Supra2.5-Pro-Instruct(Q4_0)"))
     }
 
@@ -120,8 +120,8 @@ class ShellCommandParserTest {
     // ---- chat / agent 进入会话 ----
 
     @Test
-    fun chatByIndexEntersSessionAndClearsScreen() {
-        val result = parse("chat 1")
+    fun chatByZeroEntersSessionAndClearsScreenWithoutEcho() {
+        val result = parse("chat 0")
         assertEquals(ShellStage.SESSION, result.stage)
         assertEquals(
             listOf(
@@ -131,8 +131,8 @@ class ShellCommandParserTest {
             ),
             result.effects,
         )
-        assertTrue(result.text().contains("CHAT"))
-        assertTrue(result.text().contains("Supra2.5-Pro-Instruct(Q4_0)"))
+        // 清屏后不追加任何系统回显；模式告知由顶栏 [CHAT] 承担。
+        assertTrue(result.output.isEmpty())
     }
 
     @Test
@@ -160,7 +160,7 @@ class ShellCommandParserTest {
 
     @Test
     fun chatRejectsOutOfRangeIndexes() {
-        assertTrue(parse("chat 0").text().contains("未找到本地模型：0"))
+        assertTrue(parse("chat 1").text().contains("未找到本地模型：1"))
         assertTrue(parse("chat 9").text().contains("未找到本地模型：9"))
     }
 
@@ -176,12 +176,12 @@ class ShellCommandParserTest {
         assertTrue(result.effects.contains(ShellEffect.ClearScreen))
         assertTrue(result.effects.contains(ShellEffect.SetMode(TerminalMode.AGENT)))
         assertFalse(result.effects.any { it is ShellEffect.SelectModel })
-        assertTrue(result.text().contains("AGENT"))
+        assertTrue(result.output.isEmpty())
     }
 
     @Test
     fun agentWithIndexSelectsModel() {
-        val result = parse("agent 1")
+        val result = parse("agent 0")
         assertTrue(result.effects.contains(ShellEffect.SelectModel(smokeModel)))
     }
 

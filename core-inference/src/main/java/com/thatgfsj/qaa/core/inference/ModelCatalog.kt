@@ -14,7 +14,7 @@ enum class ModelSource { BUILT_IN, PULL, IMPORT }
 /**
  * 模型清单条目：`model list` 一行，也是 `chat <序号>` 的解析目标。
  *
- * @param ordinal 从 1 起、按"内置优先 + 展示名排序"生成的稳定序号
+ * @param ordinal 清单序号：内置冒烟模型固定为 0，下载 / 导入模型从 1 起连续编号
  * @param sizeBytes 模型体积（多文件模型为各 GGUF 之和），未知为 null
  * @param path 主文件绝对路径；未落盘或 SDK 查询失败时为 null
  */
@@ -36,7 +36,10 @@ data class RegisteredModel(val key: String, val name: String, val source: ModelS
  * 内 GGUF 求和。
  *
  * 来源优先级：持久清单 > 命名规则（`local/` 前缀为 IMPORT，其余 SDK 模型为 PULL）；
- * 内置条目恒为序号 1，其余按展示名排序。
+ * 内置条目固定为 0 号基准，其余按展示名排序后从 1 起连续编号。
+ *
+ * 序号只在列清单时按当前目录内容重新推导，不写进持久清单（models.tsv），
+ * 因此新增 / 删除模型不会让旧清单里的序号留存或漂移。
  */
 class ModelCatalog(
     private val modelsDir: File,
@@ -47,12 +50,12 @@ class ModelCatalog(
     private val manifest = ModelManifest(File(modelsDir, MANIFEST_FILE_NAME))
     private val registerMutex = Mutex()
 
-    /** 当前清单（内置条目恒为序号 1，其余按展示名排序后连续编号）。 */
+    /** 当前清单（内置条目固定 0 号，其余按展示名排序后连续编号）。 */
     suspend fun list(): List<CatalogEntry> = withContext(ioDispatcher) { buildEntries() }
 
-    /** 按序号取条目（1 起，越界或非正数为 null）。 */
+    /** 按序号取条目（内置冒烟模型为 0 号，下载 / 导入从 1 起；负数或越界为 null）。 */
     suspend fun resolve(ordinal: Int): CatalogEntry? =
-        if (ordinal <= 0) null else list().firstOrNull { it.ordinal == ordinal }
+        if (ordinal < 0) null else list().firstOrNull { it.ordinal == ordinal }
 
     /** 按序号或展示名/文件名取条目，大小写不敏感；未命中为 null。 */
     suspend fun resolveByName(token: String): CatalogEntry? {
@@ -116,9 +119,10 @@ class ModelCatalog(
                 path = file.absolutePath,
             )
         }
+        // 内置冒烟模型由排序固定排首位并取 0 号，其余按展示名顺序从 1 起连续编号。
         return entries
             .sortedWith(compareBy({ it.source != ModelSource.BUILT_IN }, { it.name.lowercase() }))
-            .mapIndexed { index, entry -> entry.copy(ordinal = index + 1) }
+            .mapIndexed { index, entry -> entry.copy(ordinal = index) }
     }
 
     private suspend fun installedModels(): List<InstalledModel> {

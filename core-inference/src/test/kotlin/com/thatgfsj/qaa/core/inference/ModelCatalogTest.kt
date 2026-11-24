@@ -19,9 +19,9 @@ import org.junit.jupiter.api.io.TempDir
 class ModelCatalogTest {
 
     @Test
-    fun 空目录_仅内置条目且序号为一(@TempDir dir: File) = runTest {
+    fun 空目录_仅内置条目且序号为零(@TempDir dir: File) = runTest {
         val entry = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined).list().single()
-        assertEquals(1, entry.ordinal)
+        assertEquals(0, entry.ordinal)
         assertEquals(ModelCatalog.BUILT_IN_NAME, entry.name)
         assertEquals(ModelCatalog.BUILT_IN_QUANTIZATION, entry.quantization)
         assertEquals(ModelCatalog.BUILT_IN_SIZE_BYTES, entry.sizeBytes)
@@ -37,7 +37,7 @@ class ModelCatalogTest {
         val catalog = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined)
         val entries = catalog.list()
         assertEquals(listOf(ModelCatalog.BUILT_IN_NAME, "Alpha", "Zeta"), entries.map { it.name })
-        assertEquals(listOf(1, 2, 3), entries.map { it.ordinal })
+        assertEquals(listOf(0, 1, 2), entries.map { it.ordinal })
         assertEquals("Q4_K_M", entries[1].quantization)
         assertEquals(20L, entries[1].sizeBytes)
         assertEquals(ModelSource.IMPORT, entries[1].source)
@@ -84,13 +84,15 @@ class ModelCatalogTest {
     fun 序号与名称解析_大小写不敏感(@TempDir dir: File) = runTest {
         writeFile(dir, "Alpha-Q4_0.gguf", 3)
         val catalog = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined)
-        assertEquals(ModelCatalog.BUILT_IN_NAME, catalog.resolve(1)?.name)
-        assertEquals("Alpha", catalog.resolve(2)?.name)
-        assertNull(catalog.resolve(0))
+        assertEquals(ModelCatalog.BUILT_IN_NAME, catalog.resolve(0)?.name)
+        assertEquals("Alpha", catalog.resolve(1)?.name)
+        assertNull(catalog.resolve(2))
+        assertNull(catalog.resolve(-1))
         assertNull(catalog.resolve(9))
+        assertEquals(ModelCatalog.BUILT_IN_NAME, catalog.resolveByName("0")?.name)
         assertEquals("Alpha", catalog.resolveByName("alpha")?.name)
         assertEquals("Alpha", catalog.resolveByName("Alpha-Q4_0.gguf")?.name)
-        assertEquals("Alpha", catalog.resolveByName("2")?.name)
+        assertEquals("Alpha", catalog.resolveByName("1")?.name)
         assertNull(catalog.resolveByName("missing"))
     }
 }

@@ -38,18 +38,18 @@ enum class BackendRequest(val command: String, val displayName: String) {
     }
 }
 
-/** 本地模型条目：[index] 从 1 起，面向 model 清单与 chat / agent 选型。 */
+/** 本地模型条目：[index] 为清单序号——内置冒烟模型固定 0，下载 / 导入从 1 起。 */
 data class LocalModelEntry(val index: Int, val name: String, val quantization: String) {
     val displayText: String get() = "$name($quantization)"
 }
 
-/** 本地模型目录：Phase 1 仅内置冒烟模型（docs/ARCHITECTURE.md 第 1 节）。 */
+/** 本地模型目录：Phase 1 仅内置冒烟模型（docs/ARCHITECTURE.md 第 1 节），固定 0 号。 */
 object LocalModelCatalog {
     const val SMOKE_MODEL_NAME = "Supra2.5-Pro-Instruct"
     const val SMOKE_MODEL_QUANTIZATION = "Q4_0"
 
     val entries: List<LocalModelEntry> = listOf(
-        LocalModelEntry(index = 1, name = SMOKE_MODEL_NAME, quantization = SMOKE_MODEL_QUANTIZATION),
+        LocalModelEntry(index = 0, name = SMOKE_MODEL_NAME, quantization = SMOKE_MODEL_QUANTIZATION),
     )
 }
 
