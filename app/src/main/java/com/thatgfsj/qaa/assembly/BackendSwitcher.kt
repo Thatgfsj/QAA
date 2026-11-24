@@ -26,6 +26,7 @@ internal sealed interface BackendSwitchResult {
  * 新后端失败时按旧后端重载一次以恢复可用性，仍失败则提示重新选择模型。
  *
  * 只操作 LLM 引擎本身，不经过 ModelMemoryCoordinator（其状态机仅管 LLM/画图互斥）。
+ * 重载沿用当前 nCtx（#106）：切后端不得顺带把上下文退回默认 4096。
  */
 internal class BackendSwitcher(
     private val engine: LlmEnginePort,
@@ -37,6 +38,7 @@ internal class BackendSwitcher(
         modelSource: String?,
         previous: ComputeBackend,
         request: BackendRequest,
+        nCtx: Int = LlmLoadConfig().nCtx,
     ): BackendSwitchResult {
         val next = request.toComputeBackend()
         if (modelSource == null) {
@@ -51,7 +53,7 @@ internal class BackendSwitcher(
                 "已锁定请求后端：${request.displayName}；引擎尚未加载，下次载入模型时生效。",
             )
         }
-        return reload(modelSource, previous, next, request)
+        return reload(modelSource, previous, next, request, nCtx)
     }
 
     private suspend fun reload(
@@ -59,11 +61,14 @@ internal class BackendSwitcher(
         previous: ComputeBackend,
         next: ComputeBackend,
         request: BackendRequest,
+        nCtx: Int,
     ): BackendSwitchResult {
         statusSink("正在切换推理后端并重载模型…")
         AppLog.modelUnloaded(File(modelSource).name)
         engine.unload()
-        val failure = engine.load(modelSource, LlmLoadConfig(backend = next)).exceptionOrNull()
+        val failure = engine
+            .load(modelSource, LlmLoadConfig(backend = next, nCtx = nCtx))
+            .exceptionOrNull()
         if (failure == null) {
             statusSink(AgentRuntime.READY_TEXT)
             return BackendSwitchResult.Applied(
@@ -74,7 +79,9 @@ internal class BackendSwitcher(
         val reason = failure.message ?: failure::class.simpleName.orEmpty()
         // 新档位失败：先清掉可能残留的半加载状态，再按旧档位重载。
         engine.unload()
-        val restored = engine.load(modelSource, LlmLoadConfig(backend = previous)).isSuccess
+        val restored = engine
+            .load(modelSource, LlmLoadConfig(backend = previous, nCtx = nCtx))
+            .isSuccess
         statusSink(if (restored) AgentRuntime.READY_TEXT else "后端切换失败，模型未载入")
         return if (restored) {
             BackendSwitchResult.RolledBack(

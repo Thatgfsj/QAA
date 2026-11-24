@@ -133,4 +133,15 @@ class LlmGatewayAdapterTest {
         assertEquals("工具结果：\n文件内容", messages[1].content)
         assertEquals("系统段", messages[0].content)
     }
+
+    @Test
+    fun 引擎未报告nCtx时统计栏回退到设置值提供者() = runTest {
+        // #106：引擎指标 nCtx=0（沿用模型默认）时，用当前用户设置回显统计栏总量。
+        val zero = metrics.copy(nCtx = 0)
+        val adapter = LlmGatewayAdapter(FakeEngine(zero)) { 32768 }
+
+        adapter.streamGenerate(listOf(PromptMessage(PromptRole.USER, "你好")))
+
+        assertEquals(32768, adapter.metrics.value.contextTokens)
+    }
 }

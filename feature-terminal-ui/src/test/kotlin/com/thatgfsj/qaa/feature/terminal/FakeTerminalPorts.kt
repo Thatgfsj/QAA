@@ -79,6 +79,16 @@ class FakeTerminalAgentPort(
 
     override suspend fun statusExtra(): String = statusText
 
+    // ---- #106 /ctx 上下文长度 ----
+    var contextLengthText = "上下文：设置 32768（引擎 32768）→ 预算 31600 token"
+    var contextLengthSetText = "已保存上下文长度：16384 token（原 32768）；引擎尚未加载，下次载入模型时生效。"
+    val contextLengths = mutableListOf<Int>()
+
+    override suspend fun contextLength(): String = contextLengthText
+
+    override suspend fun setContextLength(tokens: Int): String =
+        contextLengthSetText.also { contextLengths += tokens }
+
     override suspend fun newSession(): String = newSessionText.also { newSessionCount += 1 }
 }
 

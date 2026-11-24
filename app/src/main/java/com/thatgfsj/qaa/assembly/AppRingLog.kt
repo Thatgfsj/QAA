@@ -153,6 +153,7 @@ object AppLog {
     const val TAG_TOOL = "Tool"
     const val TAG_SESSION = "Session"
     const val TAG_EXPORT = "Export"
+    const val TAG_CONTEXT = "Context"
 
     private fun suffix(detail: String): String =
         detail.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()
@@ -226,6 +227,24 @@ object AppLog {
     /** /new：新建会话。 */
     fun sessionOpened(id: String) {
         AppRingLog.global.info(TAG_SESSION, "新建会话：$id")
+    }
+
+    /** 上下文载入安全网（#106）：nCtx 载入失败后自动回退 4096 重试。 */
+    fun contextFallback(requested: Int, fallback: Int, reason: String) {
+        AppRingLog.global.warn(
+            TAG_CONTEXT,
+            "上下文 $requested 载入失败${suffix(reason)}；已自动回退 $fallback 重试",
+        )
+    }
+
+    /** /ctx 切换结果（#106）：[applied] 为 true 表示已按新值重载，false 表示仅保存设置。 */
+    fun contextChanged(from: Int, to: Int, applied: Boolean) {
+        val message = "上下文长度 $from → $to；" + if (applied) "已重载生效" else "仅保存设置"
+        if (applied) {
+            AppRingLog.global.info(TAG_CONTEXT, message)
+        } else {
+            AppRingLog.global.warn(TAG_CONTEXT, message)
+        }
     }
 
     /** 运行链错误码（失败原因短码 + 可读信息）。 */

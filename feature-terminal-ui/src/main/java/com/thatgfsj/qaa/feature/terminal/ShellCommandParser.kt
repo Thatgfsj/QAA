@@ -1,5 +1,7 @@
 package com.thatgfsj.qaa.feature.terminal
 
+import com.thatgfsj.qaa.core.harness.ContextWindow
+
 /**
  * Shell 命令解析器（Issue #10）：纯函数、纯 Kotlin，与 Compose / Android 完全解耦，可 JVM 单测。
  *
@@ -35,6 +37,7 @@ object ShellCommandParser {
             "storage" -> parseStorage(tokens, context)
             "clear" -> parseClear(tokens, context)
             "/logs" -> logs(tokens, context)
+            "/ctx" -> contextLength(tokens, context)
             "/status" -> statusResult(context)
             "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
             else -> unknownShellCommand(tokens.first(), context)
@@ -207,9 +210,10 @@ object ShellCommandParser {
             "/skills" -> singleEffect(tokens, context, "/skills", ShellEffect.QuerySkills)
             "/export" -> export(tokens, context)
             "/logs" -> logs(tokens, context)
+            "/ctx" -> contextLength(tokens, context)
             else -> error(
                 context,
-                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs；" +
+                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs、/ctx；" +
                     "输入 /help 查看完整说明。",
             )
         }
@@ -263,6 +267,24 @@ object ShellCommandParser {
             )
         }
         return ShellParseResult(context.stage, effects = listOf(ShellEffect.ExportLogs(lines)))
+    }
+
+    /**
+     * /ctx [档位]：无参查询当前设置 / 引擎 nCtx / 派生预算；带参必须命中 4 档之一（#106）。
+     * 两阶段都可用：顶层态也能查设置，避免初始化失败时看不到预算。
+     */
+    private fun contextLength(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 2) return usage(context, "/ctx [档位]", "/ctx 最多接受一个档位参数。")
+        val token = tokens.getOrNull(1)
+            ?: return ShellParseResult(context.stage, effects = listOf(ShellEffect.QueryContextLength))
+        val value = token.toIntOrNull()
+        if (value == null || !ContextWindow.isValid(value)) {
+            return error(
+                context,
+                "档位无效：$token。可选档位：${ContextWindow.OPTIONS.joinToString("、")} token。",
+            )
+        }
+        return ShellParseResult(context.stage, effects = listOf(ShellEffect.SetContextLength(value)))
     }
 
     private fun steer(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {

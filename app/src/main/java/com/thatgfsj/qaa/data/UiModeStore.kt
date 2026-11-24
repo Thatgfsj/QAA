@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.thatgfsj.qaa.UiMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -17,8 +16,6 @@ interface UiModeStore {
 }
 
 internal val UI_MODE_KEY = intPreferencesKey("ui_mode")
-
-private val Context.qaaDataStore by preferencesDataStore(name = "qaa_settings")
 
 /**
  * DataStore preferences 实现。

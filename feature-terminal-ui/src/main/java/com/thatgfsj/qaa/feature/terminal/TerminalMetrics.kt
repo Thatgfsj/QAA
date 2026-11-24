@@ -1,5 +1,6 @@
 package com.thatgfsj.qaa.feature.terminal
 
+import com.thatgfsj.qaa.core.harness.ContextWindow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -15,13 +16,13 @@ import java.util.Locale
  *
  * - [ttftMs]：首 Token 时延；未开始 / 未命中为 null，统计栏显示「--」。
  * - [tokensPerSecond]：生成速度；未开始为 null，生成结束可置 0.0。
- * - [tokensUsed]：上下文已用 Token；[contextTokens]：nCtx 总量（冒烟配置 4096）。
+ * - [tokensUsed]：上下文已用 Token；[contextTokens]：nCtx 总量（默认档 32768，见 ContextWindow）。
  */
 data class TerminalMetricsSnapshot(
     val ttftMs: Long? = null,
     val tokensPerSecond: Double? = null,
     val tokensUsed: Int = 0,
-    val contextTokens: Int = 4096,
+    val contextTokens: Int = ContextWindow.DEFAULT,
 )
 
 /** 底部常驻统计栏单行文案（Issue #9 规格）：TTFT: 142ms | 速度: 38.4 tok/s | Token: 412 / 4096。 */
@@ -70,7 +71,7 @@ class FakeMetricsTicker(
 
     companion object {
         const val DEFAULT_INTERVAL_MS = 1_000L
-        const val DEFAULT_CONTEXT_TOKENS = 4096
+        const val DEFAULT_CONTEXT_TOKENS = ContextWindow.DEFAULT
         /** Issue #9 示例冒烟值。 */
         const val SMOKE_TTFT_MS = 142L
         internal val SPEED_CYCLE = doubleArrayOf(36.0, 37.2, 38.4, 39.6, 40.8)

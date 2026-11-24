@@ -63,8 +63,8 @@ data class LlmLoadConfig(
     val backend: ComputeBackend = ComputeBackend.AUTO,
     /** GenieX runtime_id；GGUF 固定为 llama_cpp。 */
     val runtimeId: String = RUNTIME_LLAMA_CPP,
-    /** 上下文长度，0 表示沿用模型自带默认。 */
-    val nCtx: Int = 4096,
+    /** 上下文长度，0 表示沿用模型自带默认；默认值见 [DEFAULT_N_CTX]。 */
+    val nCtx: Int = DEFAULT_N_CTX,
     val nThreads: Int = 8,
     val nThreadsBatch: Int = 8,
     /** HTP 电源模式（"low_power_saver".."burst"）；空串表示 SDK 默认 burst。 */
@@ -78,6 +78,12 @@ data class LlmLoadConfig(
 
     companion object {
         const val RUNTIME_LLAMA_CPP = "llama_cpp"
+
+        /**
+         * 默认上下文长度（#106）：值保持 4096 不变，保护既有测试与 SDK 冒烟契约；
+         * 生产由 :app 按用户设置（core-harness ContextWindow）派生传入。
+         */
+        const val DEFAULT_N_CTX = 4096
     }
 }
 

@@ -8,7 +8,9 @@ import com.thatgfsj.qaa.core.harness.CompactionResult
 import com.thatgfsj.qaa.core.harness.ConfirmationDecision
 import com.thatgfsj.qaa.core.harness.ConfirmationGate
 import com.thatgfsj.qaa.core.harness.ContextCompactor
+import com.thatgfsj.qaa.core.harness.ContextWindow
 import com.thatgfsj.qaa.core.harness.ForkResult
+import com.thatgfsj.qaa.core.harness.HeuristicTokenCounter
 import com.thatgfsj.qaa.core.harness.JsonlTurnRecorder
 import com.thatgfsj.qaa.core.harness.LoraTraceExporter
 import com.thatgfsj.qaa.core.harness.PromptAssembler
@@ -44,6 +46,8 @@ import com.thatgfsj.qaa.core.tools.DrawImageTool
 import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
+import com.thatgfsj.qaa.data.ContextLengthStore
+import com.thatgfsj.qaa.data.dataStoreContextLengthStore
 import com.thatgfsj.qaa.feature.normal.chat.ChatMetrics
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
@@ -70,6 +74,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
@@ -93,7 +98,10 @@ import kotlinx.coroutines.withContext
  * - [ContextCompactor] 在工具步边界与轮末两个安全点自动检查，/compact 走手动入口；
  * - [ModelMemoryCoordinator] 单例，draw_image 本期 engine = null（快速失败，Phase 3 门禁后接入）。
  */
-class AgentRuntime private constructor(private val appContext: Context) :
+class AgentRuntime private constructor(
+    private val appContext: Context,
+    private val contextLengthStore: ContextLengthStore,
+) :
     TerminalAgentPort,
     NormalAgentPort,
     TerminalModelListPort,
@@ -114,7 +122,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         sessionFactory = GenieXLlmSessionFactory(),
         backendProbe = LogcatBackendProbe(),
     )
-    private val llmGateway = LlmGatewayAdapter(engine)
+    private val llmGateway = LlmGatewayAdapter(engine) { contextLengthSetting }
     private val releaser = AssetModelReleaser(AndroidAssetSource(appContext), modelsDir)
     private val catalog = ModelCatalog(modelsDir, DefaultGenieXModelGateway)
     private val pullClient = ModelPullClient()
@@ -140,7 +148,14 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val sessionSwitcher = SessionSwitcher(sessionsDir)
     private val jsonlRecorder = JsonlTurnRecorder(sessionStore)
     private val skills = SkillRegistry.fromDirectory(skillsDir)
-    private val compactor = ContextCompactor(engine = llmGateway)
+    private val tokenCounter = HeuristicTokenCounter()
+    private val promptAssembler = PromptAssembler(skillsSection = skills.describeAll())
+
+    /** PromptAssembler 稳定前缀（system + skills 两段）的 token 数：只计一次并缓存（#106）。 */
+    private val stablePrefixTokens: Int by lazy {
+        tokenCounter.countMessages(promptAssembler.assemble(emptyList()))
+    }
+    private val compactor = ContextCompactor(engine = llmGateway, counter = tokenCounter)
 
     /** token 级流式转发器：生成步 → UI 增量行（压缩等内部生成期间静默）。 */
     private val tokenRelay = AssistantTokenRelay()
@@ -153,7 +168,11 @@ class AgentRuntime private constructor(private val appContext: Context) :
     private val driver = SteerTurnDriver(steerQueue)
 
     private val memoryCoordinator = ModelMemoryCoordinator(
-        llm = LlmEngineMemoryHandle(engine) { loadedModelSource },
+        llm = LlmEngineMemoryHandle(
+            engine = engine,
+            modelSource = { loadedModelSource },
+            config = { LlmLoadConfig(backend = backend, nCtx = loadedContextTokens) },
+        ),
         imageGen = AbsentImageGenHandle(),
         memoryProbe = MemoryProbe {
             val runtime = Runtime.getRuntime()
@@ -177,7 +196,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         tools = toolGateway,
         gate = gate,
         recorder = recorder,
-        assembler = PromptAssembler(skillsSection = skills.describeAll()),
+        assembler = promptAssembler,
         interruptCheck = {
             // 工具步边界是安全点：先做压缩检查，再消费 steer（消费即终止本轮）。
             safePointCompact()
@@ -202,10 +221,32 @@ class AgentRuntime private constructor(private val appContext: Context) :
     @Volatile
     private var backend: ComputeBackend = ComputeBackend.AUTO
 
+    /** 用户设置的上下文长度（持久化值；终端 /ctx 或 Normal 设置页写入，首启从 DataStore 读取）。 */
+    @Volatile
+    private var contextLengthSetting: Int = ContextWindow.DEFAULT
+
+    /** 引擎实际载入的 nCtx：安全网回退后可能小于 [contextLengthSetting]。 */
+    @Volatile
+    private var loadedContextTokens: Int = ContextWindow.DEFAULT
+
+    /** 最近一次安全网回退回执（非空表示上次载入发生过 4096 回退）。 */
+    @Volatile
+    private var lastContextFallbackText: String? = null
+
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
     private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
     private val backendSwitcher = BackendSwitcher(engine) { _status.value = it }
+    private val contextLengthSwitcher = ContextLengthSwitcher(engine) { _status.value = it }
+    private val contextLoadFallback = ContextLoadFallback(engine) { requested, failure ->
+        val reason = failure.message ?: failure::class.simpleName.orEmpty()
+        AppLog.contextFallback(requested, ContextLoadFallback.FALLBACK_N_CTX, reason)
+        val text = describeContextFallback(requested, ContextLoadFallback.FALLBACK_N_CTX)
+        lastContextFallbackText = text
+        _status.value = text
+        emitNotice(text)
+    }
+    private val preflightGuard = ContextPreflightGuard(tokenCounter)
 
     override val state: StateFlow<TerminalAgentState> = _state.asStateFlow()
 
@@ -266,30 +307,40 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     override suspend fun selectModel(token: String): String {
         ensureSdkReady()
+        syncContextLength()
         val entry = catalog.resolveByName(token)
             ?: return "未找到本地模型：$token。输入 model 查看清单（名称或序号，内置模型为 0 号）。"
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
-        if (engine.isLoaded.value && loadedModelSource == path) return "模型已在运行：${entry.name}"
+        if (engine.isLoaded.value &&
+            loadedModelSource == path &&
+            loadedContextTokens == contextLengthSetting
+        ) {
+            return "模型已在运行：${entry.name}"
+        }
         // 切换耗时由运行链状态流广播：终端占位行据此出现 / 移除，UI 不做耗时估算。
         AppLog.modelLoadStart(entry.name)
         _modelLoad.value = TerminalModelLoadState.Loading(entry.name)
-        val result = try {
-            engine.load(path, LlmLoadConfig(backend = backend))
+        val outcome = try {
+            loadWithContextFallback(path)
         } finally {
             _modelLoad.value = TerminalModelLoadState.Idle
         }
-        loadedModelSource = path
-        return result.fold(
-            onSuccess = {
-                _status.value = READY_TEXT
-                AppLog.modelLoaded(entry.name, "后端 ${backend.displayName()}")
-                "模型已载入：${entry.name}（${entry.quantization ?: "未知量化"}）"
-            },
-            onFailure = {
-                AppLog.modelLoadFailed(entry.name, it.message ?: it::class.simpleName.orEmpty())
-                "模型加载失败：${it.message ?: it::class.simpleName}"
-            },
-        )
+        return when (outcome) {
+            is ContextLoadOutcome.Loaded -> {
+                loadedModelSource = path
+                loadedContextTokens = outcome.nCtx
+                if (outcome.nCtx == contextLengthSetting) lastContextFallbackText = null
+                _status.value = readyText()
+                AppLog.modelLoaded(entry.name, "后端 ${backend.displayName()}，nCtx ${outcome.nCtx}")
+                "模型已载入：${entry.name}（${entry.quantization ?: "未知量化"}）" +
+                    fallbackSuffix(outcome.nCtx)
+            }
+            is ContextLoadOutcome.Failed -> {
+                val reason = outcome.cause.message ?: outcome.cause::class.simpleName.orEmpty()
+                AppLog.modelLoadFailed(entry.name, reason)
+                "模型加载失败：$reason"
+            }
+        }
     }
 
     override suspend fun lockBackend(request: BackendRequest): String {
@@ -297,7 +348,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
         if (engine.isLoaded.value && turnMutex.isLocked) {
             return "轮次进行中：暂不能切换后端，请等本轮结束后重试。"
         }
-        val switched = backendSwitcher.apply(loadedModelSource, backend, request)
+        val switched = backendSwitcher.apply(
+            modelSource = loadedModelSource,
+            previous = backend,
+            request = request,
+            nCtx = effectiveContextTokens(),
+        )
         // 降级链命中（含回滚）单独按 WARN 记录，便于 /logs 里一眼定位。
         AppLog.backend(
             request = request.displayName,
@@ -314,6 +370,68 @@ class AgentRuntime private constructor(private val appContext: Context) :
                 result.message
             }
             is BackendSwitchResult.RolledBack -> result.message
+        }
+    }
+
+    // ---- 上下文长度（#106） ----
+
+    override suspend fun contextLength(): String {
+        val text = describeContextLength(
+            setting = contextLengthSetting,
+            engine = effectiveContextTokens(),
+            budget = currentBudget(),
+        )
+        val fallback = lastContextFallbackText ?: return text
+        return text + "\n" + fallback
+    }
+
+    override suspend fun setContextLength(tokens: Int): String {
+        if (!ContextWindow.isValid(tokens)) {
+            return "无效的上下文长度：$tokens。可选档位：" +
+                ContextWindow.OPTIONS.joinToString("、") + " token。"
+        }
+        if (turnMutex.isLocked) {
+            return "轮次进行中：暂不能切换上下文长度，请等本轮结束后重试。"
+        }
+        val previous = contextLengthSetting
+        val result = contextLengthSwitcher.set(
+            modelSource = loadedModelSource,
+            current = previous,
+            requested = tokens,
+            backend = backend,
+        )
+        when (result) {
+            is ContextLengthChangeResult.Applied -> {
+                contextLengthSetting = tokens
+                loadedContextTokens = tokens
+                // 用户已把档位固定到实际载入值：安全网提示不再适用。
+                lastContextFallbackText = null
+                persistContextLength(tokens)
+            }
+            // 只保存不重载（>8192 / 引擎未加载 / 值未变）：设置值立即更新，载入时生效。
+            is ContextLengthChangeResult.Deferred -> {
+                contextLengthSetting = tokens
+                persistContextLength(tokens)
+            }
+            // 回滚：旧值仍生效，不落盘。
+            is ContextLengthChangeResult.RolledBack -> Unit
+        }
+        AppLog.contextChanged(
+            from = previous,
+            to = tokens,
+            applied = result is ContextLengthChangeResult.Applied,
+        )
+        return result.message
+    }
+
+    /** 写 DataStore；失败只记日志，不影响本次内存生效。 */
+    private suspend fun persistContextLength(tokens: Int) {
+        try {
+            contextLengthStore.setTokens(tokens)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            AppLog.error(ERROR_CONTEXT, error.message ?: error::class.simpleName.orEmpty())
         }
     }
 
@@ -348,8 +466,14 @@ class AgentRuntime private constructor(private val appContext: Context) :
             return "轮次进行中：手动压缩已排队到最近安全点。"
         }
         return describeCompaction(
-            runCompaction { compactor.compactManually(sessionStore, CONTEXT_BUDGET) },
-        )
+            runCompaction {
+                compactor.compactManually(
+                    sessionStore,
+                    currentBudget(),
+                    prefixTokens = stablePrefixTokens,
+                )
+            },
+        ) + watermarkSuffix()
     }
 
     override suspend fun skills(): String {
@@ -427,8 +551,16 @@ class AgentRuntime private constructor(private val appContext: Context) :
                     summaries = summaryCount,
                 ),
             )
+            appendLine(
+                describeContextLength(
+                    setting = contextLengthSetting,
+                    engine = effectiveContextTokens(),
+                    budget = currentBudget(),
+                ),
+            )
+            lastContextFallbackText?.let { appendLine(it) }
             append(
-                "上下文：预算 $CONTEXT_BUDGET token，上次 prompt ${llmGateway.lastPromptTokens ?: 0} token；" +
+                "上次 prompt ${llmGateway.lastPromptTokens ?: 0} token；" +
                     "待处理输入：$queued；运行状态：${_state.value}",
             )
         }
@@ -516,6 +648,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
         _state.value = TerminalAgentState.RUNNING
         recorder.beginTurn()
         try {
+            // 每轮首次生成前做上下文预检（#106）：越界先压缩，压缩后仍越界则拒绝生成，
+            // 避免把注定超窗的 prompt 交给引擎（真机 3951/4096 事故的直接防线）。
+            if (!preflightAdmits(text)) {
+                emitNotice(PREFLIGHT_INSUFFICIENT_TEXT)
+                return@withLock
+            }
             driver.drive(loop, text, onToken = tokenRelay::emit)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -534,7 +672,10 @@ class AgentRuntime private constructor(private val appContext: Context) :
     /** 首启链（幂等）：释放 → SDK init → 清单 → 引擎加载。 */
     private suspend fun initialize() = initMutex.withLock {
         if (initialized) return@withLock
+        // 首启即按持久化设置载入（#106）：默认 32768，无迁移特例。
+        syncContextLength()
         if (engine.isLoaded.value) {
+            loadedContextTokens = contextLengthSetting
             initialized = true
             return@withLock
         }
@@ -558,24 +699,32 @@ class AgentRuntime private constructor(private val appContext: Context) :
             _status.value = "正在加载模型 ${source.name}…"
             AppLog.modelLoadStart(source.name)
             _modelLoad.value = TerminalModelLoadState.Loading(source.name)
-            val loadFailure = try {
-                engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).exceptionOrNull()
+            val outcome = try {
+                loadWithContextFallback(source.absolutePath)
             } finally {
                 _modelLoad.value = TerminalModelLoadState.Idle
             }
-            if (loadFailure != null) {
-                AppLog.modelLoadFailed(
-                    source.name,
-                    loadFailure.message ?: loadFailure::class.simpleName.orEmpty(),
-                )
-                fail("启动失败：${loadFailure.message ?: loadFailure::class.simpleName}")
-                return@withLock
+            when (outcome) {
+                is ContextLoadOutcome.Loaded -> {
+                    loadedModelSource = source.absolutePath
+                    loadedContextTokens = outcome.nCtx
+                    if (outcome.nCtx == contextLengthSetting) lastContextFallbackText = null
+                    AppLog.modelLoaded(
+                        source.name,
+                        "后端 ${backend.displayName()}，nCtx ${outcome.nCtx}",
+                    )
+                    initialized = true
+                    _state.value = TerminalAgentState.IDLE
+                    _status.value = readyText()
+                }
+                is ContextLoadOutcome.Failed -> {
+                    val reason = outcome.cause.message
+                        ?: outcome.cause::class.simpleName.orEmpty()
+                    AppLog.modelLoadFailed(source.name, reason)
+                    fail("启动失败：$reason")
+                    return@withLock
+                }
             }
-            loadedModelSource = source.absolutePath
-            AppLog.modelLoaded(source.name, "后端 ${backend.displayName()}")
-            initialized = true
-            _state.value = TerminalAgentState.IDLE
-            _status.value = READY_TEXT
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -598,23 +747,113 @@ class AgentRuntime private constructor(private val appContext: Context) :
         return sdkClient.initialize().isSuccess
     }
 
+    /** 每轮首次生成前的上下文预检（#106）：判定 via [preflightGuard]。 */
+    private suspend fun preflightAdmits(text: String): Boolean {
+        val nCtx = effectiveContextTokens()
+        val budget = ContextWindow.promptBudget(nCtx)
+        return preflightGuard.admit(
+            text = text,
+            lastPromptTokens = llmGateway.lastPromptTokens,
+            estimatedHistory = {
+                compactor.estimateContextTokens(sessionStore, prefixTokens = stablePrefixTokens)
+            },
+            nCtx = nCtx,
+            compact = { used ->
+                runCompaction {
+                    compactor.compact(
+                        store = sessionStore,
+                        contextBudget = budget,
+                        usedTokens = used,
+                        prefixTokens = stablePrefixTokens,
+                    )
+                }
+            },
+        )
+    }
+
+    /** 从 DataStore 同步设置值（首启 / 每次载入模型前）：非法值回退默认档。 */
+    private suspend fun syncContextLength() {
+        val stored = runCatching { contextLengthStore.tokens.first() }.getOrNull()
+        contextLengthSetting = if (stored != null && ContextWindow.isValid(stored)) {
+            stored
+        } else {
+            ContextWindow.DEFAULT
+        }
+        if (!engine.isLoaded.value) loadedContextTokens = contextLengthSetting
+    }
+
+    /** 引擎实际生效的 nCtx：已加载时取载入值（可能被安全网回退），否则取设置值。 */
+    private fun effectiveContextTokens(): Int =
+        if (engine.isLoaded.value) loadedContextTokens else contextLengthSetting
+
+    /** 当前提示预算（压缩阈值与 /status 回显共用）。 */
+    private fun currentBudget(): Int = ContextWindow.promptBudget(effectiveContextTokens())
+
+    /** 统一载入配置（#106）：后端锁定值 + 当前上下文长度设置。 */
+    private fun loadConfig(backendOverride: ComputeBackend = backend): LlmLoadConfig =
+        LlmLoadConfig(backend = backendOverride, nCtx = contextLengthSetting)
+
+    /** 安全网（#106）：按配置 nCtx 载入失败时记录 AppLog 并自动回退 4096 重试一次。 */
+    private suspend fun loadWithContextFallback(modelSource: String): ContextLoadOutcome =
+        contextLoadFallback.load(modelSource, loadConfig())
+
+    /** 就绪文案：发生过安全网回退时附带说明，避免用户误以为设置档位已生效。 */
+    private fun readyText(): String =
+        if (lastContextFallbackText != null) {
+            "$READY_TEXT（上下文已回退 $loadedContextTokens，终端 /ctx 可改）"
+        } else {
+            READY_TEXT
+        }
+
+    /** 载入回执附言：实际 nCtx 与设置值不一致时说明回退原因。 */
+    private fun fallbackSuffix(nCtx: Int): String =
+        if (nCtx == contextLengthSetting) {
+            ""
+        } else {
+            "；" + (lastContextFallbackText ?: describeContextFallback(contextLengthSetting, nCtx))
+        }
+
     /**
      * 安全点压缩（工具步边界 / 轮末）：先处理 /compact 排队，再按实测或估算占用判定自动压缩。
      * 摘要生成属内部调用，期间关闭统计栏刷新，避免污染用户可见指标。
      */
     private suspend fun safePointCompact() {
+        val budget = currentBudget()
         if (manualCompactRequested.compareAndSet(true, false)) {
             emitNotice(
                 describeCompaction(
-                    runCompaction { compactor.compactManually(sessionStore, CONTEXT_BUDGET) },
-                ),
+                    runCompaction {
+                        compactor.compactManually(
+                            sessionStore,
+                            budget,
+                            prefixTokens = stablePrefixTokens,
+                        )
+                    },
+                ) + watermarkSuffix(),
             )
             return
         }
-        val used = llmGateway.lastPromptTokens ?: compactor.estimateContextTokens(sessionStore)
-        if (!compactor.shouldCompact(used, CONTEXT_BUDGET)) return
-        val result = runCompaction { compactor.compact(sessionStore, CONTEXT_BUDGET, used) }
-        if (result is CompactionResult.Compacted) emitNotice(describeCompaction(result))
+        val used = llmGateway.lastPromptTokens
+            ?: compactor.estimateContextTokens(sessionStore, prefixTokens = stablePrefixTokens)
+        if (!compactor.shouldCompact(used, budget)) return
+        val result = runCompaction {
+            compactor.compact(
+                store = sessionStore,
+                contextBudget = budget,
+                usedTokens = used,
+                prefixTokens = stablePrefixTokens,
+            )
+        }
+        if (result is CompactionResult.Compacted) {
+            emitNotice(describeCompaction(result) + watermarkSuffix(result))
+        }
+    }
+
+    /** 压缩回执附言：显示压缩后水位是否达到 0.5·预算 的目标（#106）。 */
+    private fun watermarkSuffix(result: CompactionResult? = null): String {
+        val compacted = result as? CompactionResult.Compacted
+            ?: return "；目标水位 0.5·预算（/status 可查看当前预算）。"
+        return if (compacted.watermarkSatisfied) "（已达目标水位）" else "（仍高于目标水位，可再 /compact）"
     }
 
     private suspend fun runCompaction(block: suspend () -> CompactionResult): CompactionResult {
@@ -654,8 +893,8 @@ class AgentRuntime private constructor(private val appContext: Context) :
         /** 工具步硬顶（设计文档 1.2）。 */
         const val MAX_TOOL_STEPS = 12
 
-        /** 上下文预算：冒烟 nCtx 4096 扣除输出预留后的可用 prompt 预算。 */
-        const val CONTEXT_BUDGET = 3072
+        /** 上下文不足时的统一提示（#106 preflight 拒绝生成）。 */
+        const val PREFLIGHT_INSUFFICIENT_TEXT = "上下文不足：请 /new 或 /compact"
 
         const val PREPARING_TEXT = "正在准备运行环境…"
         const val READY_TEXT = "就绪"
@@ -665,6 +904,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         const val ERROR_TURN = "E_TURN"
         const val ERROR_EXPORT = "E_EXPORT"
         const val ERROR_LOG_EXPORT = "E_LOG_EXPORT"
+        const val ERROR_CONTEXT = "E_CONTEXT"
 
         private const val NO_MODEL_HINT = "未找到可用模型"
 
@@ -680,7 +920,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
                 source = AndroidSkillsAssetSource(appContext.assets),
                 targetDir = File(appContext.filesDir, SKILLS_DIR),
             ).release()
-            return AgentRuntime(appContext)
+            return AgentRuntime(appContext, dataStoreContextLengthStore(appContext))
         }
     }
 }

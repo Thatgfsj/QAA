@@ -1,5 +1,6 @@
 package com.thatgfsj.qaa.feature.normal.settings
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,21 +11,30 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.thatgfsj.qaa.core.harness.ContextWindow
 
 /**
- * 设置页（Issue #8）。
+ * 设置页（Issue #8 / #106）。
  *
  * 硬约束："切换至终端模式"仅暴露 [onSwitchToTerminal] 回调占位；
  * ui_mode 持久化写入与切换即立即重启 App 属 Issue #7，本期严禁实现。
+ *
+ * 上下文长度（#106）：Normal 侧只保存设置值、不触发引擎重载；立即生效走终端 /ctx。
+ * 选项固定为 [ContextWindow.OPTIONS] 四档，默认 [ContextWindow.DEFAULT]。
  */
 @Composable
-fun SettingsScreen(onSwitchToTerminal: () -> Unit) {
+fun SettingsScreen(
+    onSwitchToTerminal: () -> Unit,
+    contextTokens: Int = ContextWindow.DEFAULT,
+    onContextTokensChange: (Int) -> Unit = {},
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -56,7 +66,31 @@ fun SettingsScreen(onSwitchToTerminal: () -> Unit) {
         GroupTitle("通用")
         Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
             Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("更多设置项随后续议题开放。", style = MaterialTheme.typography.bodySmall)
+                Text("上下文长度（token）", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "模型载入时的上下文窗口，默认 32768。改动只保存设置，需重新载入模型后生效；" +
+                        "立即生效请在终端执行 /ctx <档位>。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ContextWindow.OPTIONS.forEach { option ->
+                        FilterChip(
+                            selected = option == contextTokens,
+                            onClick = { onContextTokensChange(option) },
+                            label = { Text(option.toString()) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "提示：≥16384 的长上下文在 HTP/NPU 上可能触发 abort；建议先用 4096 / 8192 验证模型可用性。",
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
         }
 

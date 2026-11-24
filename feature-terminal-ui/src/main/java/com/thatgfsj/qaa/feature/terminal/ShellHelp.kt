@@ -36,6 +36,7 @@ private val HELP_ROWS = listOf(
     HelpRow("/skills", "会话", "查看可用技能"),
     HelpRow("/export [路径]", "会话", "导出当前分支轨迹"),
     HelpRow("/logs [行数]", "全部", "导出应用内日志（默认 200 行）"),
+    HelpRow("/ctx [档位]", "全部", "查看 / 设置上下文长度"),
 )
 
 /** 全中文命令表（命令、适用状态、说明三列）与输入约定提示。 */
@@ -51,6 +52,8 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· chat / agent 支持模型名或序号（内置模型为 0 号，下载 / 导入从 1 起）；输入 model 查看本地模型清单。")
     appendLine("· backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。")
     appendLine("· /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。")
+    appendLine("· /ctx 档位：4096 / 8192 / 16384 / 32768；≤8192 且模型已加载时自动重载生效，更大档位需重新载入模型。")
+    appendLine("· 长上下文（≥16384）在 HTP/NPU 上可能触发 abort，建议先用小档位验证。")
     append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
 

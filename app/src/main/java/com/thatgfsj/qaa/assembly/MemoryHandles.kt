@@ -2,6 +2,7 @@ package com.thatgfsj.qaa.assembly
 
 import com.thatgfsj.qaa.core.inference.ImageGenHandle
 import com.thatgfsj.qaa.core.inference.LlmEnginePort
+import com.thatgfsj.qaa.core.inference.LlmLoadConfig
 import com.thatgfsj.qaa.core.inference.OutputFileCheck
 import com.thatgfsj.qaa.core.inference.OutputFileProbe
 import com.thatgfsj.qaa.core.tools.SandboxFs
@@ -16,6 +17,7 @@ import java.io.File
 class LlmEngineMemoryHandle(
     private val engine: LlmEnginePort,
     private val modelSource: () -> String?,
+    private val config: () -> LlmLoadConfig = { LlmLoadConfig() },
 ) : com.thatgfsj.qaa.core.inference.LlmHandle {
 
     override val isLoaded: Boolean get() = engine.isLoaded.value
@@ -36,7 +38,8 @@ class LlmEngineMemoryHandle(
 
     override suspend fun reload(): Result<Unit> {
         val source = modelSource() ?: return Result.failure(IllegalStateException("尚未选择模型"))
-        return engine.load(source)
+        // 重载必须沿用当前 nCtx 与后端设置（#106），否则内存互斥恢复会退回默认 4096。
+        return engine.load(source, config())
     }
 
     override suspend fun injectImageResult(imagePath: String, summary: String): Result<Unit> =

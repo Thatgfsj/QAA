@@ -114,6 +114,12 @@ sealed interface ShellEffect {
     /** /logs [行数]：把应用内环形日志导出到沙盒 exports/logs/。 */
     data class ExportLogs(val lines: Int?) : ShellEffect
 
+    /** /ctx：查询上下文长度设置、引擎实际 nCtx 与派生预算（#106）。 */
+    data object QueryContextLength : ShellEffect
+
+    /** /ctx <档位>：切换上下文长度（≤8192 且已加载时自动重载，>8192 只保存）（#106）。 */
+    data class SetContextLength(val tokens: Int) : ShellEffect
+
     /** /status 追加运行态明细（模型清单数、会话树规模、待处理输入）。 */
     data object QueryStatusExtra : ShellEffect
 

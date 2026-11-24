@@ -1,5 +1,6 @@
 package com.thatgfsj.qaa.feature.normal.chat
 
+import com.thatgfsj.qaa.core.harness.ContextWindow
 import java.util.Locale
 
 /**
@@ -7,12 +8,14 @@ import java.util.Locale
  *
  * 未载入模型或尚未产生实测指标时三项均为空，指标条显示 `--` 占位；
  * 数据只由装配层指标流推送，UI 不做本地推算。
+ *
+ * [contextTokens] 默认取 ContextWindow.DEFAULT（#106 首启 32k），实际值由装配层指标流覆盖。
  */
 data class ChatMetrics(
     val ttftMs: Long? = null,
     val tokensPerSecond: Double? = null,
     val tokensUsed: Int = 0,
-    val contextTokens: Int = 4096,
+    val contextTokens: Int = ContextWindow.DEFAULT,
 ) {
     /** 尚无任何实测指标（未载入模型 / 从未生成）。 */
     val isPlaceholder: Boolean
