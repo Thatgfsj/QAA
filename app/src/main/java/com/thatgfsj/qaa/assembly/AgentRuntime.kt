@@ -575,8 +575,20 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
         private const val NO_MODEL_HINT = "未找到可用模型"
 
-        /** 生产装配入口（applicationContext 持有，避免泄漏 Activity）。 */
-        fun create(context: Context): AgentRuntime = AgentRuntime(context.applicationContext)
+        /**
+         * 生产装配入口（applicationContext 持有，避免泄漏 Activity）。
+         *
+         * 内置技能先释放到 filesDir/skills（幂等、仅数 KB）：[SkillRegistry] 构造时即可
+         * 扫描到，断网首启也能在 /skills 与 AGENT 描述段看到内置技能。
+         */
+        fun create(context: Context): AgentRuntime {
+            val appContext = context.applicationContext
+            SkillsReleaser(
+                source = AndroidSkillsAssetSource(appContext.assets),
+                targetDir = File(appContext.filesDir, SKILLS_DIR),
+            ).release()
+            return AgentRuntime(appContext)
+        }
     }
 }
 
