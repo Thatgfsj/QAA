@@ -28,6 +28,9 @@ class FakeTerminalAgentPort(
     val backends = mutableListOf<BackendRequest>()
 
     var treeText = "● n-000001 [user] 你好"
+
+    /** 非空时 tree 抛出该异常（#99：验证异常不再静默）。 */
+    var treeError: Throwable? = null
     var forkText = "已从节点 n-000001 分叉"
     var compactText = "已压缩上下文：1 段"
     var skillsText = "技能注册表：注册 0 个"
@@ -62,7 +65,7 @@ class FakeTerminalAgentPort(
     override suspend fun selectModel(token: String): String =
         (selectModelText ?: "模型已载入：$token").also { selectedModels += token }
 
-    override suspend fun tree(): String = treeText
+    override suspend fun tree(): String = treeError?.let { throw it } ?: treeText
 
     override suspend fun fork(nodeId: String?): String =
         forkText + (nodeId?.let { "（节点 $it）" } ?: "")

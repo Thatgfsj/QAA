@@ -32,14 +32,18 @@ data class RegisteredModel(val key: String, val name: String, val source: ModelS
 
 /**
  * 本地模型清单：合并内置条目、GenieX 托管模型（list + getPaths，0.10.0 无
- * listDetailed/query）与模型目录 `*.gguf` 扫描结果，按绝对路径去重；体积按 model_dir
- * 内 GGUF 求和。
+ * listDetailed/query）与模型目录 `*.gguf` 扫描结果；体积按 model_dir 内 GGUF 求和。
+ *
+ * 去重（#98）：**路径 + 模型身份双键**。同一模型可能同时来自 SDK 托管名、缓存工作副本与
+ * 模型目录扫描（三个路径互不相同），仅按路径去重会让同一模型在清单里出现多次；因此再按
+ * 模型身份（展示名 + 量化精度）兜底去重。内置冒烟模型的身份由 0 号条目先占用：任何与内置
+ * 资产同名或身份一致的工作副本 / 影子条目都不进入清单，冷启动不再累积重复条目。
  *
  * 来源优先级：持久清单 > 命名规则（`local/` 前缀为 IMPORT，其余 SDK 模型为 PULL）；
- * 内置条目固定为 0 号基准，其余按展示名排序后从 1 起连续编号。
+ * 内置条目固定为 0 号基准，其余按展示名 / 量化 / 路径稳定排序后从 1 起连续编号。
  *
- * 序号只在列清单时按当前目录内容重新推导，不写进持久清单（models.tsv），
- * 因此新增 / 删除模型不会让旧清单里的序号留存或漂移。
+ * 序号只在列清单时按当前清单重新推导，不写进持久清单（models.tsv），也不做任何条数硬编码：
+ * 新增 / 删除（#111）模型后序号自动收缩重排，不会留下空洞或让旧序号复活。
  */
 class ModelCatalog(
     private val modelsDir: File,
@@ -92,37 +96,80 @@ class ModelCatalog(
                 path = builtInFile.takeIf { builtInExists }?.absolutePath,
             ),
         )
+        // #98：路径去重（同文件多来源）+ 身份去重（SDK 为同一模型生成的多个托管名 / 工作副本）。
+        // 内置模型身份先占用，任何影子条目都会被拒绝，清单里内置模型始终只有 0 号一条。
         val seenPaths = mutableSetOf<String>()
+        val seenIdentities = mutableSetOf(identityOf(BUILT_IN_NAME, BUILT_IN_QUANTIZATION))
         if (builtInExists) seenPaths += builtInFile.absolutePath
         installedModels().forEach { installed ->
-            val path = installed.path
-            if (path != null && !seenPaths.add(path)) return@forEach
             val meta = registered[installed.modelName]
+            val name = meta?.name ?: displayNameOf(installed.fileName ?: installed.modelName)
+            val quantization = quantizationOf(installed.fileName) ?: quantizationOf(installed.modelName)
+            if (isBuiltInWorkingCopy(installed.fileName, name, quantization)) return@forEach
+            if (!claimUnique(name, quantization, installed.path, seenPaths, seenIdentities)) return@forEach
             entries += CatalogEntry(
                 ordinal = 0,
-                name = meta?.name ?: displayNameOf(installed.fileName ?: installed.modelName),
-                quantization = quantizationOf(installed.fileName),
+                name = name,
+                quantization = quantization,
                 sizeBytes = installed.sizeBytes,
                 source = meta?.source ?: sourceOf(installed.modelName),
-                path = path,
+                path = installed.path,
             )
         }
         modelFiles(modelsDir).forEach { file ->
-            if (!seenPaths.add(file.absolutePath)) return@forEach
             val meta = registered[file.name]
+            val name = meta?.name ?: displayNameOf(file.name)
+            val quantization = quantizationOf(file.name)
+            if (isBuiltInWorkingCopy(file.name, name, quantization)) return@forEach
+            if (!claimUnique(name, quantization, file.absolutePath, seenPaths, seenIdentities)) return@forEach
             entries += CatalogEntry(
                 ordinal = 0,
-                name = meta?.name ?: displayNameOf(file.name),
-                quantization = quantizationOf(file.name),
+                name = name,
+                quantization = quantization,
                 sizeBytes = file.length(),
                 source = meta?.source ?: ModelSource.IMPORT,
                 path = file.absolutePath,
             )
         }
-        // 内置冒烟模型由排序固定排首位并取 0 号，其余按展示名顺序从 1 起连续编号。
+        // 内置冒烟模型由排序固定排首位并取 0 号，其余按展示名 / 量化 / 路径稳定排序后从 1 起连续编号。
+        // 序号永远按当前清单重新推导（不持久化、不硬编码条数）：删除模型后索引自动收缩，旧序号不复活。
         return entries
-            .sortedWith(compareBy({ it.source != ModelSource.BUILT_IN }, { it.name.lowercase() }))
+            .sortedWith(
+                compareBy(
+                    { it.source != ModelSource.BUILT_IN },
+                    { it.name.lowercase() },
+                    { it.quantization.orEmpty() },
+                    { it.path.orEmpty() },
+                ),
+            )
             .mapIndexed { index, entry -> entry.copy(ordinal = index) }
+    }
+
+    /** 唯一键去重：路径与模型身份各登记一次，任一已登记即视为重复（返回 false）。 */
+    private fun claimUnique(
+        name: String,
+        quantization: String?,
+        path: String?,
+        seenPaths: MutableSet<String>,
+        seenIdentities: MutableSet<String>,
+    ): Boolean {
+        if (path != null && !seenPaths.add(path)) return false
+        return seenIdentities.add(identityOf(name, quantization))
+    }
+
+    /** 模型身份键：展示名（小写）+ 量化精度；与文件路径、SDK 托管名无关（#98 的唯一键）。 */
+    private fun identityOf(name: String, quantization: String?): String =
+        name.trim().lowercase() + IDENTITY_SEPARATOR + quantization?.trim()?.uppercase().orEmpty()
+
+    /**
+     * 内置模型工作副本判定（#98）：文件名与内置资产同名，或身份（展示名 + 量化）与内置模型一致，
+     * 都算内置模型的影子条目，不进入清单（内置模型固定只经 0 号条目暴露）。
+     */
+    private fun isBuiltInWorkingCopy(fileName: String?, name: String, quantization: String?): Boolean {
+        val base = fileName?.substringAfterLast('/')?.substringAfterLast('\\')
+        if (base != null && base.equals(BUILT_IN_FILE_NAME, ignoreCase = true)) return true
+        return name.trim().equals(BUILT_IN_NAME, ignoreCase = true) &&
+            quantization?.trim().equals(BUILT_IN_QUANTIZATION, ignoreCase = true)
     }
 
     private suspend fun installedModels(): List<InstalledModel> {
@@ -160,6 +207,9 @@ class ModelCatalog(
         const val BUILT_IN_FILE_NAME = "Supra2.5-Pro-Instruct-Q4_0.gguf"
         /** 持久清单文件名（位于模型目录内）。 */
         const val MANIFEST_FILE_NAME = "models.tsv"
+
+        /** 模型身份键分隔符（展示名 + 量化，见 [identityOf]）。 */
+        private const val IDENTITY_SEPARATOR = "|"
         private const val GGUF_SUFFIX = ".gguf"
         private const val LOCAL_PREFIX = "local/"
     }

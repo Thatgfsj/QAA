@@ -319,6 +319,52 @@ class TreeSessionStoreTest {
         }
     }
 
+    @Test
+    fun 树打印_摘要节点标注覆盖范围与受保护() {
+        val store = TreeSessionStore("s1")
+        store.append(SessionRole.USER, "第一轮问题")
+        store.append(
+            role = SessionRole.SUMMARY,
+            content = "此前对话的压缩摘要",
+            compaction = SummaryCompaction(
+                coveredFrom = "n-000001",
+                coveredTo = "n-000002",
+                nodeCount = 2,
+                estimatedTokens = 128,
+                createdAt = FIXED_TIME,
+            ),
+        )
+
+        val line = store.renderTree().lines().first { it.contains("此前对话的压缩摘要") }
+        // #99：摘要节点必须自解释——覆盖范围、节点数、受保护状态一眼可见。
+        assertTrue(line.contains("[摘要"))
+        assertTrue(line.contains("覆盖 n-000001..n-000002"))
+        assertTrue(line.contains("2 节点"))
+        assertTrue(line.contains("受保护"))
+    }
+
+    @Test
+    fun 树打印_无根节点也不静默返回空串() {
+        val file = newFile()
+        // 父链成环：两个节点互为父节点，任何一方都不是根（#99 真机「/tree 无输出」兜底路径）。
+        file.writeText(
+            "{\"recordType\":\"node\",\"schemaVersion\":1,\"id\":\"n-000001\",\"parentId\":\"n-000002\"," +
+                "\"role\":\"user\",\"content\":\"环一\",\"timestamp\":1}\n" +
+                "{\"recordType\":\"node\",\"schemaVersion\":1,\"id\":\"n-000002\",\"parentId\":\"n-000001\"," +
+                "\"role\":\"assistant\",\"content\":\"环二\",\"timestamp\":2}\n",
+        )
+        val store = TreeSessionStore("s1", file)
+        try {
+            val tree = store.renderTree()
+            assertTrue(tree.isNotBlank())
+            assertTrue(tree.contains(TreeSessionStore.UNROOTED_NOTICE))
+            assertTrue(tree.contains("环一"))
+            assertTrue(tree.contains("环二"))
+        } finally {
+            store.close()
+        }
+    }
+
     private companion object {
         const val FIXED_TIME = 1_763_932_800_123L
     }

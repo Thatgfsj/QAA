@@ -107,11 +107,22 @@ data class TerminalUiState(
     val metrics: TerminalMetricsSnapshot = TerminalMetricsSnapshot(),
     /** 滚动跟随开关：用户上滑离开底部即暂停，回到底部自动恢复。 */
     val followOutput: Boolean = true,
+    /** 模型载入进度（#104）：载入中时顶栏模型段显示「载入中」，不假装就绪。 */
+    val modelLoad: TerminalModelLoadState = TerminalModelLoadState.Idle,
 )
 
 /** 顶部常驻栏单行三段内容：[MODEL] 模型名(量化) | [CHAT/AGENT] | [实际后端]。 */
 fun TerminalUiState.topBarSegments(): List<String> = listOf(
-    "[MODEL] ${modelInfo.displayText}",
+    topBarModelSegment(),
     "[${mode.displayTag}]",
     "[${backend.displayTag}]",
 )
+
+/**
+ * 顶栏模型段（#104）：载入中不显示「模型名(量化)」，避免顶栏先于引擎给出就绪假象；
+ * 载入完成后自然回到模型名 + 量化。
+ */
+private fun TerminalUiState.topBarModelSegment(): String = when (val load = modelLoad) {
+    TerminalModelLoadState.Idle -> "[MODEL] ${modelInfo.displayText}"
+    is TerminalModelLoadState.Loading -> "[MODEL] 载入中：${load.name}…"
+}

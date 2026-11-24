@@ -237,7 +237,35 @@ class TerminalShellControllerTest {
         shell.onInput("chat 0")
         shell.onInput("/tree")
         advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.entries.any { it.text == port.treeText })
+        val text = viewModel.uiState.value.entries.joinToString("\n") { it.text }
+        assertTrue(text.contains(port.treeText))
+        assertTrue(text.contains(TREE_FORK_HINT))
+    }
+
+    @Test
+    fun treeCommandEmptyTreeShowsExplicitHint() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort().apply { treeText = "" }
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/tree")
+        advanceUntilIdle()
+        val text = viewModel.uiState.value.entries.joinToString("\n") { it.text }
+        assertTrue(text.contains("会话树为空"))
+        assertTrue(text.contains("/fork"))
+    }
+
+    @Test
+    fun treeCommandRenderFailureBecomesChineseReceipt() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort().apply { treeError = AssertionError("渲染崩溃") }
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/tree")
+        advanceUntilIdle()
+        val text = viewModel.uiState.value.entries.joinToString("\n") { it.text }
+        assertTrue(text.contains("命令执行失败"))
+        assertTrue(text.contains("渲染崩溃"))
     }
 
     @Test
