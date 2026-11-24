@@ -67,7 +67,7 @@ class ContextLengthSwitcherTest {
         assertEquals(32768, (result as ContextLengthChangeResult.Deferred).next)
         assertTrue(result.message.contains("已保存"))
         assertTrue(result.message.contains("需重新载入模型后生效"))
-        assertTrue(result.message.contains("HTP/NPU"))
+        assertTrue(result.message.contains("内存溢出闪退"))
     }
 
     @Test
@@ -118,7 +118,7 @@ class ContextLengthSwitcherTest {
         )
         assertTrue(
             describeContextLengthChange(4096, 32768, ContextLengthChange.SAVED_ONLY)
-                .contains("HTP/NPU"),
+                .contains("内存溢出闪退"),
         )
         assertTrue(
             describeContextLengthChange(4096, 8192, ContextLengthChange.NOT_LOADED)
@@ -141,7 +141,8 @@ class ContextLengthSwitcherTest {
         assertTrue(text.contains("设置 32768"))
         assertTrue(text.contains("引擎 4096"))
         assertTrue(text.contains("预算 3456"))
-        assertTrue(text.contains("4096 / 8192 / 16384 / 32768"))
+        // #112：回执不再列建议档位。
+        assertFalse(text.contains("8192 / 16384"))
     }
 
     /** 记录调用序列的引擎替身；[failures] 按 load 顺序消费，用尽后成功。 */

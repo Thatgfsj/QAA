@@ -30,6 +30,8 @@ import com.thatgfsj.qaa.core.inference.GenieXLlmEngine
 import com.thatgfsj.qaa.core.inference.GenieXLlmSessionFactory
 import com.thatgfsj.qaa.core.inference.GenieXModelResolver
 import com.thatgfsj.qaa.core.inference.GenieXSdkClient
+import com.thatgfsj.qaa.core.inference.GgufKvEstimator
+import com.thatgfsj.qaa.core.inference.KvEstimate
 import com.thatgfsj.qaa.core.inference.LogcatBackendProbe
 import com.thatgfsj.qaa.core.inference.LlmEnginePort
 import com.thatgfsj.qaa.core.inference.LlmLoadConfig
@@ -238,6 +240,13 @@ class AgentRuntime private constructor(
     @Volatile
     private var lastContextFallbackText: String? = null
 
+    /** /ctx 回执用的设备内存探针（ActivityManager；JVM 单测可注入 fake）。 */
+    private val deviceMemoryProbe: DeviceMemoryProbe = AndroidDeviceMemoryProbe(appContext)
+
+    /** GGUF 头 KV 估算缓存：key 为模型路径，避免每次 /ctx 重复解析 GB 级文件头。 */
+    @Volatile
+    private var kvEstimateCache: Pair<String, KvEstimate>? = null
+
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
     private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
@@ -389,19 +398,37 @@ class AgentRuntime private constructor(
     // ---- 上下文长度（#106） ----
 
     override suspend fun contextLength(): String {
-        val text = describeContextLength(
+        val engineTokens = effectiveContextTokens()
+        val modelSource = loadedModelSource
+        val kv = withContext(Dispatchers.IO) { kvEstimateFor(modelSource) }
+        val memory = runCatching { deviceMemoryProbe.read() }.getOrNull()
+        return describeContextReceipt(
             setting = contextLengthSetting,
-            engine = effectiveContextTokens(),
+            engine = engineTokens,
             budget = currentBudget(),
+            kv = kv,
+            kvNctx = engineTokens,
+            memory = memory,
+            modelLoaded = modelSource != null,
+            fallbackNotice = lastContextFallbackText,
         )
-        val fallback = lastContextFallbackText ?: return text
-        return text + "\n" + fallback
+    }
+
+    /** GGUF 头 KV 估算（按模型路径缓存）：文件缺失 / 解析失败回退 144 KiB/token 经验值。 */
+    private fun kvEstimateFor(modelSource: String?): KvEstimate {
+        if (modelSource == null) return GgufKvEstimator.estimate(null)
+        kvEstimateCache?.let { cached ->
+            if (cached.first == modelSource) return cached.second
+        }
+        val estimate = GgufKvEstimator.estimate(File(modelSource))
+        kvEstimateCache = modelSource to estimate
+        return estimate
     }
 
     override suspend fun setContextLength(tokens: Int): String {
-        if (!ContextWindow.isValid(tokens)) {
-            return "无效的上下文长度：$tokens。可选档位：" +
-                ContextWindow.OPTIONS.joinToString("、") + " token。"
+        if (!ContextWindow.isAllowed(tokens)) {
+            return "无效的上下文长度：$tokens（范围 ${ContextWindow.MIN_N_CTX}~${ContextWindow.MAX_N_CTX}；" +
+                "支持写法 ${ContextWindow.INPUT_EXAMPLES}）。"
         }
         if (turnMutex.isLocked) {
             return "轮次进行中：暂不能切换上下文长度，请等本轮结束后重试。"
@@ -799,10 +826,10 @@ class AgentRuntime private constructor(
         )
     }
 
-    /** 从 DataStore 同步设置值（首启 / 每次载入模型前）：非法值回退默认档。 */
+    /** 从 DataStore 同步设置值（首启 / 每次载入模型前）：非法值回退默认值。 */
     private suspend fun syncContextLength() {
         val stored = runCatching { contextLengthStore.tokens.first() }.getOrNull()
-        contextLengthSetting = if (stored != null && ContextWindow.isValid(stored)) {
+        contextLengthSetting = if (stored != null && ContextWindow.isAllowed(stored)) {
             stored
         } else {
             ContextWindow.DEFAULT

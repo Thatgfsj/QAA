@@ -120,10 +120,10 @@ interface TerminalAgentPort {
     /** /status 附加上半段之外的运行态信息（模型清单数、会话树、队列）。 */
     suspend fun statusExtra(): String
 
-    /** /ctx：查询上下文长度设置、引擎实际 nCtx 与派生预算（#106）。 */
+    /** /ctx：查询上下文长度设置、引擎实际 nCtx、派生预算与 KV / 设备内存估算（#106 / #112）。 */
     suspend fun contextLength(): String
 
-    /** /ctx <档位>：切换上下文长度（≤8192 且已加载时自动重载，>8192 只保存）（#106）。 */
+    /** /ctx <token>：切换上下文长度（≤8192 且已加载时自动重载，>8192 只保存）（#106 / #112）。 */
     suspend fun setContextLength(tokens: Int): String
 
     /** /system：查询系统提示词全文与来源（默认 / 自定义）（#105）。 */

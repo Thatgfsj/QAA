@@ -23,7 +23,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.thatgfsj.qaa.core.harness.ContextWindow
 import com.thatgfsj.qaa.core.harness.PromptAssembler
@@ -34,8 +37,9 @@ import com.thatgfsj.qaa.core.harness.PromptAssembler
  * 硬约束："切换至终端模式"仅暴露 [onSwitchToTerminal] 回调占位；
  * ui_mode 持久化写入与切换即立即重启 App 属 Issue #7，本期严禁实现。
  *
- * 上下文长度（#106）：Normal 侧只保存设置值、不触发引擎重载；立即生效走终端 /ctx。
- * 选项固定为 [ContextWindow.OPTIONS] 四档，默认 [ContextWindow.DEFAULT]。
+ * 上下文长度（#106 / #112）：Normal 侧只保存设置值、不触发引擎重载；立即生效走终端 /ctx。
+ * [ContextWindow.OPTIONS] 仅作为快捷 chip（建议档位），另提供自定义输入框，
+ * 接受任意 1024~1048576 的整数并支持 k / m 后缀；默认 [ContextWindow.DEFAULT]。
  *
  * 系统提示词（#105）：多行编辑 + 保存 + 恢复默认，与终端 /system 写同一 DataStore key；
  * 提示词每轮组装，保存后下一轮生效，无需重载模型。草稿与已保存值分离，未点保存不落盘。
@@ -86,7 +90,7 @@ fun SettingsScreen(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "模型载入时的上下文窗口，默认 32768。改动只保存设置，需重新载入模型后生效；" +
-                        "立即生效请在终端执行 /ctx <档位>。",
+                        "立即生效请在终端执行 /ctx <token>（如 /ctx 20k）。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(12.dp))
@@ -103,8 +107,39 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                var customInput by remember(contextTokens) { mutableStateOf(contextTokens.toString()) }
+                val inputError = contextLengthInputError(customInput)
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = customInput,
+                        onValueChange = { customInput = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("自定义长度（token）") },
+                        placeholder = { Text("如 3072、20k、64k、1m") },
+                        isError = inputError != null,
+                        supportingText = {
+                            Text(
+                                inputError
+                                    ?: "范围 ${ContextWindow.MIN_N_CTX}~${ContextWindow.MAX_N_CTX}，支持 k / m 后缀",
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    )
+                    Button(
+                        onClick = {
+                            parseContextLengthInput(customInput)?.let(onContextTokensChange)
+                        },
+                        enabled = inputError == null,
+                    ) { Text("应用") }
+                }
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    "提示：≥16384 的长上下文在 HTP/NPU 上可能触发 abort；建议先用 4096 / 8192 验证模型可用性。",
+                    "提示：建议先用 4096 / 8192 验证模型可用性；长上下文可能因内存溢出闪退（进程级崩溃）。",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
