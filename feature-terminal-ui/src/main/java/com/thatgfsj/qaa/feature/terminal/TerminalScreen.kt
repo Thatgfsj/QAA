@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * Terminal 极客终端入口（Issue #9 三段式骨架）。
+ * Terminal 终端模式入口（Issue #9 三段式骨架）。
  *
  * 固定三段布局：顶部常驻栏（不滚动）-> 中部流式滚动区（占满剩余高度）->
  * 底部常驻统计栏 + 快捷键区（不滚动）。

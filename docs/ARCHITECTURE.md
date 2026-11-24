@@ -113,7 +113,7 @@ stateDiagram-v2
 ## 6. 双前端启动路由
 
 - `ui_mode`（NORMAL / TERMINAL）经 DataStore 持久化，MainActivity 启动时读取并路由至独立入口，两视图状态互不共享。
-- Normal → Terminal：设置页"切换至极客终端模式" → 写配置 → 立即重启 App。
+- Normal → Terminal：设置页"切换至终端模式" → 写配置 → 立即重启 App。
 - Terminal → Normal：终端输入 `start window` → 写配置 → 立即重启 App。
 
 ## 7. Agent Loop 概览

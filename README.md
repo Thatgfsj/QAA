@@ -11,7 +11,7 @@
 | 端侧推理底座 | Qualcomm GenieX Android SDK（Maven Central），llama_cpp（GGUF）路径，Q4_0 优先 |
 | 后端降级链 | Hexagon NPU → HYBRID（HTP+CPU）→ GPU（Adreno 附加档）→ CPU，自动回退并在状态栏回显实际命中后端 |
 | Pi-Style Harness | 纯 Kotlin 极简 Agent Loop，最小工具原语 `read / write / edit / draw_image`，与 UI 彻底解耦 |
-| 双前端 | Normal 正常窗口 / Terminal 极客终端三段式布局，持久化 `ui_mode` 路由，切换即重启生效 |
+| 双前端 | Normal 正常窗口 / Terminal 终端模式三段式布局，持久化 `ui_mode` 路由，切换即重启生效 |
 | 树状会话 | JSONL 树形节点存储，`/tree` `/fork` 任意节点分叉，可直接导出为 LoRA 微调轨迹 |
 | 渐进 Skills | 启动仅注入 SKILL.md 名称+一句话描述，命中任务才读全文，保护端侧 Prompt Cache |
 | 内存互斥 | ModelMemoryCoordinator 状态机强管控，严禁 LLM 与画图模型同时驻留内存 |
@@ -31,7 +31,7 @@
 :core-harness         Pi-Style Agent Loop、树状 JSONL 会话、Compaction、SteerQueue、SkillRegistry
 :core-tools           ToolExecutor 统一接口、沙盒文件系统、read/write/edit、ImageGenEngine 抽象
 :feature-normal-ui    正常窗口前端：会话 / 模型管理 / 设置
-:feature-terminal-ui  极客终端：Shell 命令解析、三段式会话视图、实时统计栏
+:feature-terminal-ui  终端模式：Shell 命令解析、三段式会话视图、实时统计栏
 ```
 
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。
@@ -46,7 +46,7 @@ git clone https://github.com/Thatgfsj/QAA.git && cd QAA
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-- Normal 模式：设置页 → "切换至极客终端模式" → App 立即重启进入终端。
+- Normal 模式：设置页 → "切换至终端模式" → App 立即重启进入终端。
 - Terminal 模式：输入 `start window` → 立即重启回正常窗口；`help` 查看全中文命令说明。
 
 ## 更新日志
