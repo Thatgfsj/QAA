@@ -492,30 +492,37 @@ class ShellCommandParserTest {
     }
 
     @Test
-    fun ctxAcceptsFourTiersInBothStages() {
-        listOf(4096, 8192, 16384, 32768).forEach { tier ->
-            assertEquals(
-                "档位 $tier",
-                listOf(ShellEffect.SetContextLength(tier)),
-                parse("/ctx $tier", session).effects,
-            )
-        }
+    fun ctxAcceptsFreeValuesInBothStages() {
+        assertEquals(listOf(ShellEffect.SetContextLength(1024)), parse("/ctx 1024", session).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(3072)), parse("/ctx 3072", session).effects)
         assertEquals(listOf(ShellEffect.SetContextLength(8192)), parse("/ctx 8192", shell).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(1048576)), parse("/ctx 1048576", session).effects)
     }
 
     @Test
-    fun ctxRejectsValuesOutsideTiers() {
-        listOf("/ctx 3072", "/ctx 65536", "/ctx abc", "/ctx -1").forEach { input ->
-            val result = parse(input, session)
-            assertTrue("$input 应被拒绝", result.effects.isEmpty())
-            assertTrue(result.text().contains("档位无效"))
-            assertTrue(result.text().contains("4096、8192、16384、32768"))
-        }
+    fun ctxAcceptsSuffixUnits() {
+        assertEquals(listOf(ShellEffect.SetContextLength(20480)), parse("/ctx 20k", session).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(20480)), parse("/ctx 20K", session).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(32768)), parse("/ctx 32k", session).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(65536)), parse("/ctx 64k", session).effects)
+        assertEquals(listOf(ShellEffect.SetContextLength(1048576)), parse("/ctx 1m", session).effects)
+        // 注意：shell 按空白切分参数，"20 k" 会被当成两个参数而报用法（空格容错只在设置页输入框生效）。
+    }
+
+    @Test
+    fun ctxRejectsInvalidValues() {
+        listOf("/ctx 0", "/ctx -1", "/ctx abc", "/ctx 1g", "/ctx 1023", "/ctx 1048577", "/ctx 1m1")
+            .forEach { input ->
+                val result = parse(input, session)
+                assertTrue("$input 应被拒绝", result.effects.isEmpty())
+                assertTrue(result.text().contains("上下文长度无效"))
+                assertTrue(result.text().contains("1024、8192、20k、64k、1m"))
+            }
     }
 
     @Test
     fun ctxRejectsExtraArguments() {
-        assertTrue(parse("/ctx 4096 8192", session).text().contains("用法：/ctx [档位]"))
+        assertTrue(parse("/ctx 4096 8192", session).text().contains("用法：/ctx [token]"))
     }
 
     @Test

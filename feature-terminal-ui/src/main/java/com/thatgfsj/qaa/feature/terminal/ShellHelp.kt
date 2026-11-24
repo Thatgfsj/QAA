@@ -36,7 +36,7 @@ private val HELP_ROWS = listOf(
     HelpRow("/skills", "会话", "查看可用技能"),
     HelpRow("/export [路径]", "会话", "导出当前分支轨迹"),
     HelpRow("/logs [行数]", "全部", "导出应用内日志（默认 200 行）"),
-    HelpRow("/ctx [档位]", "全部", "查看 / 设置上下文长度"),
+    HelpRow("/ctx [token]", "全部", "查看 / 设置上下文长度"),
     HelpRow("/system [文本|reset]", "全部", "查看 / 设置系统提示词"),
 )
 
@@ -53,9 +53,9 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· chat / agent 支持模型名或序号（内置模型为 0 号，下载 / 导入从 1 起）；输入 model 查看本地模型清单。")
     appendLine("· backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。")
     appendLine("· /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。")
-    appendLine("· /ctx 档位：4096 / 8192 / 16384 / 32768；≤8192 且模型已加载时自动重载生效，更大档位需重新载入模型。")
+    appendLine("· /ctx 长度：建议 4096 / 8192 / 16384 / 32768，亦可自定义 1024~1048576（支持 20k / 64k / 1m）。")
+    appendLine("· ≤8192 且模型已加载时 /ctx 自动重载生效，更大值需重新载入模型；长上下文可能因内存溢出闪退（进程级崩溃），建议先用小长度验证。")
     appendLine("· /system 无参查看系统提示词全文与来源；带文本整体替换，/system reset 恢复默认；提示词每轮组装，下一轮生效。")
-    appendLine("· 长上下文（≥16384）在 HTP/NPU 上可能触发 abort，建议先用小档位验证。")
     append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
 

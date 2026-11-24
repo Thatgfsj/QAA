@@ -34,13 +34,13 @@ internal enum class ContextLengthChange {
  * 上下文长度即时生效策略（#106 决策 2）：
  * - 引擎已加载且目标档位 ≤ [SAFE_AUTO_RELOAD_MAX]（8192）：卸载并按新 nCtx 重载同一模型；
  *   失败时按旧档位重载一次回滚，调用方不得落盘；
- * - 目标档位 > [SAFE_AUTO_RELOAD_MAX]：只保存设置，不自动重载（长上下文在 HTP/NPU 上
- *   有 abort 风险，交用户显式重新载入模型）；
+ * - 目标值 > [SAFE_AUTO_RELOAD_MAX]：只保存设置，不自动重载（长上下文在 HTP/NPU 上
+ *   有 native abort 风险，即进程级崩溃、用户可见为闪退，交用户显式重新载入模型）；
  * - 引擎未加载 / 没有可重载模型：只保存，下次载入模型时生效。
  *
  * 内存代价（#106）：4B 级 GQA f16 KV cache 约 144 KiB/token，32768 token ≈ 4.5 GiB；
- * 长上下文在 HTP/NPU 上有 abort 风险，故 > [SAFE_AUTO_RELOAD_MAX] 只保存设置、由用户
- * 显式重新载入模型。
+ * 长上下文在 HTP/NPU 上有 native abort 风险（进程级崩溃、用户可见为闪退），故 >
+ * [SAFE_AUTO_RELOAD_MAX] 只保存设置、由用户显式重新载入模型。
  *
  * 与 [BackendSwitcher] 同构：只操作 LLM 引擎本身，不经过 ModelMemoryCoordinator。
  */
@@ -53,8 +53,8 @@ internal class ContextLengthSwitcher(
      * 应用一次 /ctx 变更。
      *
      * @param modelSource 引擎已载入的模型路径（null 表示没有可重载模型）
-     * @param current 当前生效档位（用于失败回滚）
-     * @param requested 目标档位（必须是 [ContextWindow.OPTIONS] 之一）
+     * @param current 当前生效值（用于失败回滚）
+     * @param requested 目标值（#112：1024..1048576 任意整数）
      * @param backend 当前锁定后端：重载必须沿用，避免顺带改后端
      */
     suspend fun set(
@@ -63,7 +63,9 @@ internal class ContextLengthSwitcher(
         requested: Int,
         backend: ComputeBackend = ComputeBackend.AUTO,
     ): ContextLengthChangeResult {
-        require(ContextWindow.isValid(requested)) { "非法的上下文档位：$requested" }
+        require(ContextWindow.isAllowed(requested)) {
+            "非法的上下文长度：$requested（范围 ${ContextWindow.MIN_N_CTX}~${ContextWindow.MAX_N_CTX}）"
+        }
         if (requested == current) {
             return ContextLengthChangeResult.Deferred(
                 requested,
@@ -130,7 +132,7 @@ internal class ContextLengthSwitcher(
 
     companion object {
 
-        /** 允许自动重载的最大档位：更大档位只保存设置，避免长上下文在 HTP/NPU 上 abort。 */
+        /** 允许自动重载的最大值：更大值只保存设置，避免长上下文在非 CPU 后端内存溢出闪退。 */
         const val SAFE_AUTO_RELOAD_MAX = 8192
     }
 }
@@ -147,7 +149,7 @@ internal fun describeContextLengthChange(
     ContextLengthChange.SAVED_ONLY ->
         "已保存上下文长度：$requested token（原 $current）；大于 " +
             "${ContextLengthSwitcher.SAFE_AUTO_RELOAD_MAX} token，需重新载入模型后生效" +
-            "（长上下文在 HTP/NPU 上可能 abort）。"
+            "（长上下文可能因内存溢出闪退）。"
     ContextLengthChange.NOT_LOADED ->
         "已保存上下文长度：$requested token（原 $current）；引擎尚未加载，下次载入模型时生效。"
     ContextLengthChange.ROLLED_BACK ->
@@ -157,7 +159,6 @@ internal fun describeContextLengthChange(
             "请用 chat <模型名|序号> 重新载入。"
 }
 
-/** /ctx 查询与 /status 共用文案：设置值 / 引擎实际 nCtx / 派生提示预算。 */
+/** /ctx 查询与 /status 共用首行：设置值 / 引擎实际 nCtx / 派生提示预算（#112 不再列档位）。 */
 internal fun describeContextLength(setting: Int, engine: Int, budget: Int): String =
-    "上下文：设置 $setting（引擎 $engine）→ 预算 $budget token；" +
-        "档位：${ContextWindow.OPTIONS.joinToString(" / ")}（/ctx <档位> 修改）"
+    "上下文：设置 $setting（引擎 $engine）→ 预算 $budget token"

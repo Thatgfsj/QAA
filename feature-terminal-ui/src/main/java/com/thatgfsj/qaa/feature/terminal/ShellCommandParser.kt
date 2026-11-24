@@ -276,18 +276,21 @@ object ShellCommandParser {
     }
 
     /**
-     * /ctx [档位]：无参查询当前设置 / 引擎 nCtx / 派生预算；带参必须命中 4 档之一（#106）。
+     * /ctx [token]：无参查询当前设置 / 引擎 nCtx / 派生预算；带参接受 1024..1048576 任意整数，
+     * 支持 k / m 后缀（20k=20480、1m=1048576，大小写不敏感、可带空格，见
+     * [ContextWindow.parseInput]）；[ContextWindow.OPTIONS] 只是建议档位（#112）。
      * 两阶段都可用：顶层态也能查设置，避免初始化失败时看不到预算。
      */
     private fun contextLength(tokens: List<String>, context: ShellContext): ShellParseResult {
-        if (tokens.size > 2) return usage(context, "/ctx [档位]", "/ctx 最多接受一个档位参数。")
+        if (tokens.size > 2) return usage(context, "/ctx [token]", "/ctx 最多接受一个长度参数。")
         val token = tokens.getOrNull(1)
             ?: return ShellParseResult(context.stage, effects = listOf(ShellEffect.QueryContextLength))
-        val value = token.toIntOrNull()
-        if (value == null || !ContextWindow.isValid(value)) {
+        val value = ContextWindow.parseInput(token)
+        if (value == null) {
             return error(
                 context,
-                "档位无效：$token。可选档位：${ContextWindow.OPTIONS.joinToString("、")} token。",
+                "上下文长度无效：$token。支持写法 ${ContextWindow.INPUT_EXAMPLES}" +
+                    "（k=1024、m=1024²），范围 ${ContextWindow.MIN_N_CTX}~${ContextWindow.MAX_N_CTX}。",
             )
         }
         return ShellParseResult(context.stage, effects = listOf(ShellEffect.SetContextLength(value)))

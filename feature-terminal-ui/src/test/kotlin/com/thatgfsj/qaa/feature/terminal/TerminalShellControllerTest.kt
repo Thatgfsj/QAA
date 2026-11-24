@@ -500,20 +500,7 @@ class TerminalShellControllerTest {
     }
 
     @Test
-    fun ctxWithTierCarriesValueToPort() = runTest {
-        val viewModel = TerminalViewModel()
-        val port = FakeTerminalAgentPort()
-        val shell = controller(viewModel, agent = port, scope = this)
-        shell.onInput("chat 0")
-        shell.onInput("/ctx 16384")
-        advanceUntilIdle()
-
-        assertEquals(listOf(16384), port.contextLengths)
-        assertTrue(viewModel.uiState.value.entries.any { it.text == port.contextLengthSetText })
-    }
-
-    @Test
-    fun ctxWithInvalidTierDoesNotReachPort() = runTest {
+    fun ctxWithFreeValueCarriesValueToPort() = runTest {
         val viewModel = TerminalViewModel()
         val port = FakeTerminalAgentPort()
         val shell = controller(viewModel, agent = port, scope = this)
@@ -521,8 +508,33 @@ class TerminalShellControllerTest {
         shell.onInput("/ctx 5000")
         advanceUntilIdle()
 
+        assertEquals(listOf(5000), port.contextLengths)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.contextLengthSetText })
+    }
+
+    @Test
+    fun ctxWithSuffixCarriesNormalizedValueToPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/ctx 20k")
+        advanceUntilIdle()
+
+        assertEquals(listOf(20480), port.contextLengths)
+    }
+
+    @Test
+    fun ctxWithInvalidValueDoesNotReachPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/ctx 1000")
+        advanceUntilIdle()
+
         assertTrue(port.contextLengths.isEmpty())
-        assertTrue(viewModel.uiState.value.entries.last().text.contains("档位无效"))
+        assertTrue(viewModel.uiState.value.entries.last().text.contains("上下文长度无效"))
     }
 
     // ---- #105 /system 系统提示词路由 ----

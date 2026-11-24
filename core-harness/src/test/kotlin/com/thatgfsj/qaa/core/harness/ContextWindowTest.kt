@@ -2,24 +2,47 @@ package com.thatgfsj.qaa.core.harness
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 上下文窗口预算单测（#106）：默认档、档位合法性、四档预算与公式边界。 */
+/** 上下文窗口预算单测（#106 / #112）：默认值、范围合法性、自由输入解析、预算公式边界。 */
 class ContextWindowTest {
 
     @Test
-    fun 默认档为32k且档位固定四档() {
+    fun 默认值为32k且建议档位保留四档() {
         assertEquals(32768, ContextWindow.DEFAULT)
         assertEquals(listOf(4096, 8192, 16384, 32768), ContextWindow.OPTIONS)
     }
 
     @Test
-    fun 档位合法性只认四档() {
-        ContextWindow.OPTIONS.forEach { tier -> assertTrue("合法档 $tier", ContextWindow.isValid(tier)) }
-        listOf(-1, 0, 2048, 3072, 4095, 4097, 30000, 65536).forEach { tier ->
-            assertFalse("非法档 $tier", ContextWindow.isValid(tier))
+    fun 合法范围覆盖任意整数() {
+        listOf(1024, 3072, 4096, 5000, 8192, 20480, 65536, 1048576).forEach { value ->
+            assertTrue("合法值 $value", ContextWindow.isAllowed(value))
         }
+        listOf(-1, 0, 1023, 1048577, Int.MAX_VALUE).forEach { value ->
+            assertFalse("非法值 $value", ContextWindow.isAllowed(value))
+        }
+    }
+
+    @Test
+    fun 后缀解析支持k与m() {
+        assertEquals(20480, ContextWindow.parseInput("20k"))
+        assertEquals(20480, ContextWindow.parseInput("20K"))
+        assertEquals(65536, ContextWindow.parseInput("64k"))
+        assertEquals(1048576, ContextWindow.parseInput("1m"))
+        assertEquals(1048576, ContextWindow.parseInput("1M"))
+        assertEquals(8192, ContextWindow.parseInput("8192"))
+        assertEquals(1024, ContextWindow.parseInput(" 1 k "))
+        assertEquals(3072, ContextWindow.parseInput("3\t072"))
+    }
+
+    @Test
+    fun 后缀解析拒绝非法输入() {
+        listOf("", " ", "0", "-1", "abc", "1g", "1m1", "k", "20 kb", "1024 ", "1023", "2m")
+            .filter { it != "1024 " }
+            .forEach { raw -> assertNull("应拒绝：$raw", ContextWindow.parseInput(raw)) }
+        assertEquals(1024, ContextWindow.parseInput("1024 "))
     }
 
     @Test
@@ -51,15 +74,10 @@ class ContextWindowTest {
     }
 
     @Test
-    fun 预算随档位单调递增且恒为正() {
+    fun 预算随建议档位单调递增且恒为正() {
         val budgets = ContextWindow.OPTIONS.map { ContextWindow.promptBudget(it) }
         assertEquals(budgets.sorted(), budgets)
         assertTrue(budgets.all { it > 0 })
         assertEquals(budgets.size, budgets.distinct().size)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun 非正档位计算预算直接拒绝() {
-        ContextWindow.promptBudget(0)
     }
 }
