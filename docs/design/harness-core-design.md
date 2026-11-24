@@ -326,7 +326,7 @@ E_BINARY_FILE / E_SIZE_LIMIT / E_IO / E_ENGINE_NOT_AVAILABLE / E_MEMORY_MUTEX。
 
 | 级 | 动作 | 说明 |
 | --- | --- | --- |
-| 0 | XML 方言提取（#107） | `<tool_call>` 内 JSON、Qwen 系 `<function=…><parameter=…>`、真机 `arg_key/arg_value` 三种形态，缺闭合标签宽容；围栏内与示例语境（示例/例如/格式/如下/写作 等前后 24 字符窗口）不执行；解析失败返回 Invalid 交纠错 |
+| 0 | XML 方言提取（#107/#108） | `<tool_call>` 内 JSON、Qwen 系 `<function=…><parameter=…>`、真机 `arg_key/arg_value` 三种形态，缺闭合标签宽容；围栏内与示例语境（示例/例如/格式/如下/写作 等前后 24 字符窗口）不执行；整块 HTML 实体（`&lt;tool_call&gt;…`）先反转义再按同语义提取，参数值内五类实体还原（`&amp;` 最后，防二次解码）；闭合标签容忍标签内空白（`</arg_key >`）；嵌套 `tool_call`、缺 `<function=` 开标签等畸形返回 Invalid；重复 `arg_key`/`parameter` 后者覆盖；Qwen 多行参数仅剥模板两端排版换行、保留缩进；解析失败返回 Invalid 交纠错 |
 | 1 | 围栏剥离 | 提取代码围栏内容（json 标记或裸围栏）；多个围栏取第一个含 "tool" 的 |
 | 2 | 首花括号定位 | 从全文第一个 { 起截取，容忍前置闲聊文本 |
 | 3 | 括号配平扫描 | 逐字符扫描（正确处理字符串字面量与转义引号），深度归零处截取首个完整对象 |
@@ -336,7 +336,7 @@ E_BINARY_FILE / E_SIZE_LIMIT / E_IO / E_ENGINE_NOT_AVAILABLE / E_MEMORY_MUTEX。
 数组容忍：提取到顶层数组时按序展开为多个调用（同一步预算内顺序执行）；模板不鼓励但解析器兼容。
 别名容忍：canonical 为 tool/args；name/arguments 形态在 canonical 失败后兜底接受。
 
-工具痕迹兜底（#107）：L0 与 L1–L5 均未提取出调用时，若文本仍残留结构化工具痕迹（`<tool_call>` 后接 ASCII 工具名或 JSON 起头、`<function=NAME>` 的 NAME 为 ASCII 标识符），不再当终答，而是返回 Invalid 触发纠错/降级——修复真机上「合法 XML 调用被静默吞掉、确认门永不触发」的缺陷；散文提及（如「参数用 `<arg_key>` 与 `<arg_value>` 包裹」）不误判。HTML 实体（`&lt;tool_call&gt;`）解码见 #108。
+工具痕迹兜底（#107）：L0 与 L1–L5 均未提取出调用时，若文本仍残留结构化工具痕迹（`<tool_call>` 后接 ASCII 工具名或 JSON 起头、`<function=NAME>` 的 NAME 为 ASCII 标识符），不再当终答，而是返回 Invalid 触发纠错/降级——修复真机上「合法 XML 调用被静默吞掉、确认门永不触发」的缺陷；散文提及（如「参数用 `<arg_key>` 与 `<arg_value>` 包裹」）不误判。HTML 实体（`&lt;tool_call&gt;…`）整块反转义后复用同一提取语义，参数值内实体同样还原；闭合标签容忍标签内空白；嵌套标签、缺 `<function=` 等畸形一律转 Invalid 纠错，不再静默当终答（#108）。值内字面量 `</arg_value>` 仍按首个闭合截断（取最后闭合会吞并后续参数），已在用例 N5 注释记录。
 
 ### 4.3 重试上限与自然语言降级（严禁死循环）
 
