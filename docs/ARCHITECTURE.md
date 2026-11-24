@@ -12,6 +12,7 @@
 | 语言与 UI | Kotlin 2.x + Jetpack Compose + Coroutines，Java 17 toolchain | |
 | 推理路径 | GenieX llama_cpp（GGUF），量化优先 Q4_0 | Hexagon NPU 对 Q4_0 算子支持最完整 |
 | 冒烟模型 | Supra2.5-Pro-Instruct **Q4_0 GGUF**（67M，约 40MB） | HuggingFace：liodon-ai/Supra2.5-Pro-Instruct-GGUF |
+| 上下文长度 | 默认 **32768**；档位 4096 / 8192 / 16384 / 32768（DataStore `context_length`） | 预算 = nCtx − 输出预留 512 − 安全边界 max(128, ceil(2%·nCtx))（32768→31600）；压缩触发/目标水位 0.8 / 0.5；>8192 只保存不自动重载（HTP 长上下文 abort 风险，真机已验 32768@NPU 可载入） |
 | 目标硬件 | 骁龙 8 Gen 2 ~ 8 Elite Gen 5 | 模拟器仅验 UI/逻辑 |
 | 参考实现 | github.com/qualcomm/ai-hub-apps → `geniex_chat_android` | 官方参考 App |
 | 本机 QAIRT SDK | `/home/thatgfsj/Downloads/v2.52.0.261104`（hexagon v66~v85） | GenieX qairt 路径底层 |
@@ -91,6 +92,7 @@ GenieX SDK 无内建自动降级链与实际后端查询 API（事实依据：do
 - 流式取消必须调用 `stopStream()`（仅取消 Flow 不停止 native 生成）
 - release 混淆需应用侧 keep GenieX JNI 方法（AAR 无 consumer proguard 规则）
 - Normal 状态栏与 Terminal 顶部常驻栏订阅同一后端状态流
+- 上下文长度（#106）：所有引擎载入点（首启 / 切模型 / 切后端 / 内存互斥重载）统一经 `loadConfig(nCtx)` 传入；`/ctx` 与 Normal 设置页写同一 DataStore key；变更 ≤8192 即时重载、>8192 只保存；载入失败（Result.failure）自动回退 4096 并提示；生成前 preflight 拦截超限
 
 ## 5. ModelMemoryCoordinator 互斥状态机（硬约束）
 
