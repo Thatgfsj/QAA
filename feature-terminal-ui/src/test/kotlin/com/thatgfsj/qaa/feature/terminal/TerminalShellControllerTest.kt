@@ -326,6 +326,59 @@ class TerminalShellControllerTest {
     }
 
     @Test
+    fun modelDeleteWithoutForceOnlyEchoesAndSkipsPort() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val models = listOf(
+            LocalModelEntry(0, "Supra2.5-Pro-Instruct", "Q4_0"),
+            LocalModelEntry(1, "Qwen3-4B", "Q4_K_M", sizeBytes = 2_000_000L, path = "/data/models/qwen3.gguf"),
+        )
+        val shell = controller(viewModel, agent = port, modelList = FakeTerminalModelList(models), scope = this)
+        advanceUntilIdle()
+
+        shell.onInput("model delete 1")
+        advanceUntilIdle()
+
+        // 无 --force 只回显影响，不得触达运行链。
+        assertTrue(port.deletedModels.isEmpty())
+        val text = viewModel.uiState.value.entries.joinToString("\n") { it.text }
+        assertTrue(text.contains("确认请再次执行：model delete 1 --force"))
+        assertTrue(text.contains("/data/models/qwen3.gguf"))
+    }
+
+    @Test
+    fun modelDeleteWithForceCallsPortAndRefreshesList() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val models = listOf(
+            LocalModelEntry(0, "Supra2.5-Pro-Instruct", "Q4_0"),
+            LocalModelEntry(1, "Qwen3-4B", "Q4_K_M"),
+        )
+        var calls = 0
+        val listPort = object : TerminalModelListPort {
+            override suspend fun entries(): List<LocalModelEntry> {
+                calls += 1
+                // 删除成功后宿主清单少一项：第二次刷新不再返回被删模型（#98 不复活）。
+                return if (calls == 1) models else models.dropLast(1)
+            }
+        }
+        val shell = controller(viewModel, agent = port, modelList = listPort, scope = this)
+        advanceUntilIdle()
+
+        shell.onInput("model delete 1 --force")
+        advanceUntilIdle()
+
+        assertEquals(listOf(1 to "Qwen3-4B"), port.deletedModels)
+        assertTrue(viewModel.uiState.value.entries.map { it.text }.any { it.contains("已删除模型：Qwen2.5-1.5B") })
+        assertEquals(2, calls)
+        // 删除后立即按新清单解析：被删模型不再列出，剩余序号仍可选中。
+        shell.onInput("model")
+        val listText = viewModel.uiState.value.entries.last().text
+        assertFalse("清单仍含被删模型：$listText", listText.contains("Qwen3-4B"))
+        assertTrue(listText.contains("0. Supra2.5-Pro-Instruct(Q4_0)"))
+    }
+
+    @Test
     fun modelPullEchoesProgressAndCompletion() = runTest {
         val viewModel = TerminalViewModel()
         val events = listOf(

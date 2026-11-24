@@ -41,7 +41,7 @@ class RuntimeMappingTest {
         )
         assertEquals(
             listOf(
-                LocalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0"),
+                LocalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0", 40L, "/m/a.gguf"),
                 LocalModelEntry(2, "Qwen3-4B", "未知"),
             ),
             catalogToLocalEntries(entries),

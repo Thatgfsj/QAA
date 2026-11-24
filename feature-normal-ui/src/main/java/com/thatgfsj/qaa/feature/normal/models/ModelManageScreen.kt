@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
@@ -47,6 +48,8 @@ fun ModelManageScreen(
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val bound by viewModel.portBound.collectAsStateWithLifecycle()
     val loadingOrdinal by viewModel.loadingOrdinal.collectAsStateWithLifecycle()
+    val deletingOrdinal by viewModel.deletingOrdinal.collectAsStateWithLifecycle()
+    val pendingDelete by viewModel.pendingDelete.collectAsStateWithLifecycle()
 
     // 端口注入幂等；进入页面即做恢复检测与清单刷新（未完成下载提示继续）。
     LaunchedEffect(modelPort) { viewModel.bindPort(modelPort) }
@@ -84,10 +87,33 @@ fun ModelManageScreen(
             ModelCard(
                 model = model,
                 loading = loadingOrdinal != null && loadingOrdinal == model.ordinal,
-                busy = loadingOrdinal != null,
+                deleting = deletingOrdinal != null && deletingOrdinal == model.ordinal,
+                busy = loadingOrdinal != null || deletingOrdinal != null,
                 onActivate = { viewModel.activate(model) },
+                onDelete = { viewModel.requestDelete(model) },
             )
         }
+    }
+
+    // 删除二次确认（#111）：与终端 model delete --force 同语义，内置 0 号在 ViewModel 直接拒绝。
+    pendingDelete?.let { model ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelDelete,
+            title = { Text("删除模型？") },
+            text = {
+                Text(
+                    "将删除 " + model.name + "（" + model.quantization + "，" +
+                        formatSize(model.sizeBytes) + "）。SDK 缓存、模型文件与清单登记会一并清理，" +
+                        "操作不可撤销；若正在使用该模型请先切换。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDelete) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelDelete) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -202,8 +228,10 @@ private fun NoticeCard(message: String) {
 private fun ModelCard(
     model: ModelInfo,
     loading: Boolean,
+    deleting: Boolean,
     busy: Boolean,
     onActivate: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -226,12 +254,18 @@ private fun ModelCard(
             )
             Text(text = "体积：" + formatSize(model.sizeBytes), style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(10.dp))
-            Button(onClick = onActivate, enabled = !busy) {
-                Text(text = when {
-                    loading -> "载入中…"
-                    model.loaded -> "卸载"
-                    else -> "加载"
-                })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onActivate, enabled = !busy) {
+                    Text(text = when {
+                        loading -> "载入中…"
+                        model.loaded -> "卸载"
+                        else -> "加载"
+                    })
+                }
+                // 内置 0 号不可删（与终端 model delete 的拒绝口径一致）。
+                TextButton(onClick = onDelete, enabled = !busy && model.ordinal > 0) {
+                    Text(text = if (deleting) "删除中…" else "删除")
+                }
             }
         }
     }

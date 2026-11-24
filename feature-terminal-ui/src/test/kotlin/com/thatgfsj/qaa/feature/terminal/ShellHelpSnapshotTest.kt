@@ -19,6 +19,7 @@ class ShellHelpSnapshotTest {
             "model",
             "model pull <url>",
             "model import",
+            "model delete <序号>",
             "chat <模型名|序号>",
             "agent [模型名|序号]",
             "start window",
@@ -40,7 +41,7 @@ class ShellHelpSnapshotTest {
         )
         val text = shellHelpText()
         commands.forEach { command -> assertTrue("缺少命令：$command", text.contains(command)) }
-        assertEquals(22, rowsOf(text).size)
+        assertEquals(23, rowsOf(text).size)
     }
 
     @Test
@@ -72,6 +73,7 @@ class ShellHelpSnapshotTest {
     model                 顶层      列出本地模型
     model pull <url>      顶层      下载模型（断点续传）
     model import          顶层      导入模型（系统文件选择器）
+    model delete <序号>   顶层      删除模型（需 --force 确认）
     chat <模型名|序号>    顶层      进入 CHAT 会话
     agent [模型名|序号]   顶层      进入 AGENT 会话
     start window          顶层      切回正常窗口并重启
@@ -93,6 +95,7 @@ class ShellHelpSnapshotTest {
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
+    · model delete <序号|名称> 先回显删除影响，再次带 --force 才真正删除；内置 0 号与当前加载模型不可删。
     · chat / agent 支持模型名或序号（内置模型为 0 号，下载 / 导入从 1 起）；输入 model 查看本地模型清单。
     · backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。
     · /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。

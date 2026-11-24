@@ -162,6 +162,26 @@ class ModelDownloadTracker(
         }
     }
 
+    /**
+     * 按模型名清理记录（#111 删除模型联动）：目标名大小写不敏感匹配，返回清除条数。
+     *
+     * 记录以来源 URL 为键、target 为模型名投影，因此同时比对 URL 末段，覆盖
+     * `https://…/org/repo` 与 target=`repo` 的常见形态；无匹配时不落盘。
+     */
+    suspend fun discardByTarget(target: String): Int = locked {
+        val needle = target.trim().lowercase()
+        if (needle.isEmpty()) return@locked 0
+        val matched = records.filterValues { record ->
+            record.target.lowercase() == needle ||
+                record.url.substringAfterLast('/').substringBefore('?').lowercase() == needle
+        }.keys.toList()
+        if (matched.isEmpty()) return@locked 0
+        matched.forEach { records.remove(it) }
+        lastPersistAt = clock()
+        persist()
+        matched.size
+    }
+
     /** 启动恢复检测：遗留 RUNNING 转 INTERRUPTED，返回最近可续传记录（无则 null）。 */
     suspend fun recover(): DownloadRecord? = locked {
         var changed = false

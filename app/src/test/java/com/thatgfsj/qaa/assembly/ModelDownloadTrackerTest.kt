@@ -139,6 +139,23 @@ class ModelDownloadTrackerTest {
         assertEquals("repo-" + (ModelDownloadTracker.MAX_RECORDS + 4), reopened.first().target)
     }
 
+    @Test
+    fun 按模型名清理记录_删除模型后不留遗留任务() = runTest {
+        val tracker = newTracker()
+        tracker.start(URL, "repo")
+        tracker.start("https://huggingface.co/org/other", "other")
+
+        val removed = tracker.discardByTarget("repo")
+
+        assertEquals(1, removed)
+        assertNull(tracker.find(URL))
+        // 落盘同步：重启后也不会恢复出已删模型的下载记录。
+        assertNull(newTracker().find(URL))
+        assertNotNull(newTracker().find("https://huggingface.co/org/other"))
+        // 无匹配时返回 0 且不动其他记录。
+        assertEquals(0, tracker.discardByTarget("missing"))
+    }
+
     private companion object {
         const val URL = "https://huggingface.co/org/repo"
     }

@@ -105,6 +105,13 @@ class FakeTerminalAgentPort(
         systemPromptSetText.also { systemPromptSets += text }
 
     override suspend fun newSession(): String = newSessionText.also { newSessionCount += 1 }
+
+    /** model delete 回执与调用记录（#111）。 */
+    var deleteModelText = "已删除模型：Qwen2.5-1.5B（释放约 12.3 MB），剩余清单 1 项。"
+    val deletedModels = mutableListOf<Pair<Int, String>>()
+
+    override suspend fun deleteModel(ordinal: Int, name: String): String =
+        deleteModelText.also { deletedModels += ordinal to name }
 }
 
 /** 模型清单替身（序号与名称沿用 LocalModelEntry）。 */
