@@ -225,4 +225,39 @@ class TerminalViewModelTest {
         assertEquals(0.0, tick2.tokensPerSecond!!, 1e-9)
         assertEquals(48, tick3.tokensUsed)
     }
+
+    // ---- #93 会话级确认记忆（yes / no 长按） ----
+
+    @Test
+    fun rememberAllowStoresSessionPolicyAndResolvesPending() {
+        val vm = TerminalViewModel()
+        vm.requestToolConfirmation("write(\"a.txt\")")
+        vm.rememberToolDecision(allowed = true)
+        val state = vm.uiState.value
+        assertEquals(ToolConfirmPolicy.AUTO_ALLOW, state.confirmPolicy)
+        val resolved = state.toolConfirm as ToolConfirmState.Resolved
+        assertTrue(resolved.allowed)
+    }
+
+    @Test
+    fun rememberDenyStoresSessionPolicyEvenWithoutPending() {
+        val vm = TerminalViewModel()
+        vm.rememberToolDecision(allowed = false)
+        assertEquals(ToolConfirmPolicy.AUTO_DENY, vm.uiState.value.confirmPolicy)
+        // 无挂起项时只记策略，不伪造一次确认结果。
+        assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+    }
+
+    @Test
+    fun sessionMemoryResetsOnClearScreenAndOnExit() {
+        val vm = TerminalViewModel()
+        vm.rememberToolDecision(allowed = true)
+        vm.resetSession()
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
+
+        vm.rememberToolDecision(allowed = false)
+        vm.resetToolConfirmPolicy()
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
+        assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+    }
 }

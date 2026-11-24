@@ -254,6 +254,8 @@ class TerminalViewModel internal constructor(
             state.copy(
                 entries = emptyList(),
                 toolConfirm = ToolConfirmState.Idle,
+                // 清屏即结束本会话的自动决策约定（#93）：恢复逐次询问。
+                confirmPolicy = ToolConfirmPolicy.ASK,
                 followOutput = true,
             )
         }
@@ -298,6 +300,37 @@ class TerminalViewModel internal constructor(
     /** 用户拒绝（Deny 按钮回调）。 */
     fun onToolDeny() {
         resolveToolConfirmation(allowed = false)
+    }
+
+    /**
+     * 长按 yes / no（#93）：把本次决策升格为会话级策略，并立即结算当前挂起项（若有）。
+     *
+     * 之后确认门不再挂起，直接按策略放行 / 拒绝；清屏、退出会话或新建会话后恢复询问。
+     */
+    fun rememberToolDecision(allowed: Boolean) {
+        val policy = ToolConfirmPolicy.forDecision(allowed)
+        updateState { state ->
+            val pending = state.toolConfirm as? ToolConfirmState.Pending
+            state.copy(
+                confirmPolicy = policy,
+                toolConfirm = if (pending == null) {
+                    state.toolConfirm
+                } else {
+                    ToolConfirmState.Resolved(pending.requestId, pending.description, allowed)
+                },
+            )
+        }
+    }
+
+    /** 恢复逐次询问（/exit 离开会话时由命令路由调用）。 */
+    fun resetToolConfirmPolicy() {
+        updateState { state ->
+            if (state.confirmPolicy == ToolConfirmPolicy.ASK) {
+                state
+            } else {
+                state.copy(confirmPolicy = ToolConfirmPolicy.ASK)
+            }
+        }
     }
 
     /** 挂起被取消时收起待确认项（清屏 / 轮次取消），避免遗留无人决策的按钮。 */

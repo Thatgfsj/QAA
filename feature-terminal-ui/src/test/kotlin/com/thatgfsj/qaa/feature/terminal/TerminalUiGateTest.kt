@@ -44,6 +44,13 @@ class TerminalUiGateTest {
 
         fun deny() = resolve(allowed = false)
 
+        /** 模拟 yes / no 长按：写入会话级策略。 */
+        fun remember(allowed: Boolean) {
+            mutableState.value = mutableState.value.copy(
+                confirmPolicy = ToolConfirmPolicy.forDecision(allowed),
+            )
+        }
+
         private fun resolve(allowed: Boolean) {
             val pending = mutableState.value.toolConfirm as? ToolConfirmState.Pending ?: return
             mutableState.value = mutableState.value.copy(
@@ -119,5 +126,33 @@ class TerminalUiGateTest {
         assertFalse(decision.isCompleted) // requestId 不同，必须继续等待本次决策
         host.deny()
         assertEquals(ConfirmationDecision.DENY, decision.await())
+    }
+
+    // ---- #93 会话级自动决策 ----
+
+    @Test
+    fun 会话级自动放行不挂起并上报策略() = runTest {
+        val host = FakeHost()
+        host.remember(allowed = true)
+        var reported: Pair<String, ToolConfirmPolicy>? = null
+        val gate = TerminalUiGate(host) { description, policy -> reported = description to policy }
+
+        assertEquals(ConfirmationDecision.ALLOW, gate.awaitConfirmation(writeCall))
+        assertEquals(ToolConfirmState.Idle, host.uiState.value.toolConfirm)
+        assertNotNull(reported)
+        assertTrue(reported!!.first.startsWith("write "))
+        assertEquals(ToolConfirmPolicy.AUTO_ALLOW, reported!!.second)
+    }
+
+    @Test
+    fun 会话级自动拒绝不挂起并上报策略() = runTest {
+        val host = FakeHost()
+        host.remember(allowed = false)
+        var reported: Pair<String, ToolConfirmPolicy>? = null
+        val gate = TerminalUiGate(host) { description, policy -> reported = description to policy }
+
+        assertEquals(ConfirmationDecision.DENY, gate.awaitConfirmation(writeCall))
+        assertEquals(ToolConfirmState.Idle, host.uiState.value.toolConfirm)
+        assertEquals(ToolConfirmPolicy.AUTO_DENY, reported!!.second)
     }
 }

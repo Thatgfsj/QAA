@@ -39,8 +39,15 @@ fun TerminalHost(
     modifier: Modifier = Modifier,
 ) {
     val terminalViewModel: TerminalViewModel = viewModel()
-    val confirmGate = remember(terminalViewModel) { TerminalUiGate(terminalViewModel) }
     val scope = rememberCoroutineScope()
+    // 会话级自动决策（#93）生效时回显一行中文提示：自动放行 / 拒绝不留静默痕迹。
+    val confirmGate = remember(terminalViewModel, scope) {
+        TerminalUiGate(terminalViewModel) { description, policy ->
+            scope.launch {
+                terminalViewModel.appendOutput("已按会话级${policy.displayLabel}执行：$description")
+            }
+        }
+    }
     val importPicker = remember { DeferredAction() }
     val storagePicker = remember { DeferredAction() }
 

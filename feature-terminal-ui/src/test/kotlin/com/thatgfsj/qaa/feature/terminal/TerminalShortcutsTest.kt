@@ -42,16 +42,67 @@ class TerminalShortcutsTest {
     }
 
     @Test
-    fun orderedKeepsFourRealKeys() {
+    fun orderedKeepsFiveRealKeys() {
         assertEquals(
             listOf(
                 TerminalShortcut.HISTORY_PREV,
                 TerminalShortcut.HISTORY_NEXT,
                 TerminalShortcut.CONFIRM_ALLOW,
                 TerminalShortcut.CONFIRM_DENY,
+                TerminalShortcut.KEYBOARD,
             ),
             TerminalShortcut.ordered,
         )
+    }
+
+    // ---- #93 长按次选 / 会话级记忆 ----
+
+    @Test
+    fun keyboardKeyTogglesSoftKeyboardAndHasNoAlternate() {
+        assertEquals(TerminalShortcutAction.ToggleKeyboard, TerminalShortcut.KEYBOARD.actionFor(idle))
+        assertTrue(TerminalShortcut.KEYBOARD.alternates.isEmpty())
+    }
+
+    @Test
+    fun longPressAlternatesCarryChineseLabels() {
+        assertEquals(
+            listOf(ShortcutAlternate(TerminalShortcutAction.ClearScreen, "clear（清屏）")),
+            TerminalShortcut.HISTORY_PREV.alternates,
+        )
+        assertEquals(
+            listOf(ShortcutAlternate(TerminalShortcutAction.HistoryOldest, "跳到最早历史")),
+            TerminalShortcut.HISTORY_NEXT.alternates,
+        )
+        assertEquals(
+            listOf(ShortcutAlternate(TerminalShortcutAction.RememberAllow, "本会话自动放行")),
+            TerminalShortcut.CONFIRM_ALLOW.alternates,
+        )
+        assertEquals(
+            listOf(ShortcutAlternate(TerminalShortcutAction.RememberDeny, "本会话自动拒绝")),
+            TerminalShortcut.CONFIRM_DENY.alternates,
+        )
+    }
+
+    @Test
+    fun longPressAndShortPressStayDistinct() {
+        // 同一按键的短按与长按落在不同动作上：UI 只负责分流，语义由映射层锁定。
+        val pairs = listOf(
+            TerminalShortcut.HISTORY_PREV to TerminalShortcutAction.HistoryPrev,
+            TerminalShortcut.HISTORY_NEXT to TerminalShortcutAction.HistoryNext,
+            TerminalShortcut.CONFIRM_ALLOW to TerminalShortcutAction.AllowTool,
+            TerminalShortcut.CONFIRM_DENY to TerminalShortcutAction.DenyTool,
+        )
+        pairs.forEach { (key, shortAction) ->
+            assertEquals(shortAction, key.actionFor(pending))
+            assertTrue(key.alternates.none { it.action == shortAction })
+        }
+    }
+
+    @Test
+    fun confirmScopeLabelShowsSessionMemory() {
+        assertEquals("确认", confirmScopeLabel(ToolConfirmPolicy.ASK))
+        assertEquals("确认·自动放行", confirmScopeLabel(ToolConfirmPolicy.AUTO_ALLOW))
+        assertEquals("确认·自动拒绝", confirmScopeLabel(ToolConfirmPolicy.AUTO_DENY))
     }
 
     @Test
@@ -96,5 +147,19 @@ class TerminalShortcutsTest {
         history.record("d")
         // 提交后游标回到末尾：上翻从最新一条开始。
         assertEquals("d", history.previous(""))
+    }
+
+    @Test
+    fun inputHistoryOldestJumpsToFirstEntryAndBackToDraft() {
+        val history = TerminalInputHistory()
+        assertNull(history.oldest(""))
+        history.record("help")
+        history.record("model")
+        history.record("chat 0")
+        // ↓ 长按：直接定位最早一条，再逐条往回走，最后回到草稿位。
+        assertEquals("help", history.oldest("草稿"))
+        assertEquals("model", history.next())
+        assertEquals("chat 0", history.next())
+        assertEquals("草稿", history.next())
     }
 }
