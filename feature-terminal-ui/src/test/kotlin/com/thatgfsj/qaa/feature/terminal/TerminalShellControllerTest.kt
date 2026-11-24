@@ -414,6 +414,33 @@ class TerminalShellControllerTest {
         assertTrue(entries.single().text.contains("模型加载失败"))
     }
 
+    // ---- #94 /logs 应用内日志导出 ----
+
+    @Test
+    fun logsCommandCarriesLineCountAndEchoesReceipt() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/logs 120")
+        advanceUntilIdle()
+
+        assertEquals(listOf<Int?>(120), port.exportedLogLines)
+        assertTrue(viewModel.uiState.value.entries.any { it.text == port.logsExportText })
+    }
+
+    @Test
+    fun logsCommandWithoutCountUsesRuntimeDefault() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val shell = controller(viewModel, agent = port, scope = this)
+        shell.onInput("chat 0")
+        shell.onInput("/logs")
+        advanceUntilIdle()
+
+        assertEquals(listOf<Int?>(null), port.exportedLogLines)
+    }
+
     // ---- #93 会话级确认记忆：/exit 离开会话即恢复询问 ----
 
     @Test

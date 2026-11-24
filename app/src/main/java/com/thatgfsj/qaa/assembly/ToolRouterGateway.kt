@@ -47,8 +47,11 @@ class ToolRouterGateway(
                 status = ToolOutcomeStatus.FAILURE,
                 output = "未知工具：${call.tool}。可用工具：read / write / edit / draw_image。",
                 errorCode = ERROR_UNKNOWN_TOOL,
-            )
-        return executor.execute(call.argsJson, contextOf(stepIndex)).toOutcome()
+            ).also { AppLog.toolExecuted(call.tool, stepIndex, it.status.name, it.errorCode) }
+        val outcome = executor.execute(call.argsJson, contextOf(stepIndex)).toOutcome()
+        // 工具执行埋点（#94）：名称 / 步序号 / 结果码，供 /logs 复盘。
+        AppLog.toolExecuted(call.tool, stepIndex, outcome.status.name, outcome.errorCode)
+        return outcome
     }
 
     /** 按步序号构造工具上下文（sessionId / sandbox / limits 由装配层固定）。 */

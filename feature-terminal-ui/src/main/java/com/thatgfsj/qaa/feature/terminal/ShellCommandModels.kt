@@ -111,12 +111,18 @@ sealed interface ShellEffect {
     /** /export [路径]：把当前分支导出为微调轨迹 JSONL。 */
     data class ExportTrace(val path: String?) : ShellEffect
 
+    /** /logs [行数]：把应用内环形日志导出到沙盒 exports/logs/。 */
+    data class ExportLogs(val lines: Int?) : ShellEffect
+
     /** /status 追加运行态明细（模型清单数、会话树规模、待处理输入）。 */
     data object QueryStatusExtra : ShellEffect
 
     /** /steer <指令>：提交运行中干预。 */
     data class SteerInstruction(val text: String) : ShellEffect
 }
+
+/** /logs 行数上限：与应用内环形缓冲容量一致（:app 的 AppRingLog 容量 500 行）。 */
+const val APP_LOG_MAX_LINES = 500
 
 /** 单次解析结果：[stage] 为解析后的阶段，[output] 为中文回显行，[effects] 按列表顺序执行。 */
 data class ShellParseResult(

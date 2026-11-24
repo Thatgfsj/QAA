@@ -440,6 +440,32 @@ class ShellCommandParserTest {
         assertTrue(result.text().contains("chat / agent"))
     }
 
+    // ---- #94 /logs 应用内日志导出 ----
+
+    @Test
+    fun logsWithoutCountDefersToRuntimeDefault() {
+        // 缺省行数交给运行链（默认 200 行），解析层不猜具体数字。
+        assertEquals(listOf(ShellEffect.ExportLogs(null)), parse("/logs", session).effects)
+        assertEquals(listOf(ShellEffect.ExportLogs(null)), parse("/logs", shell).effects)
+    }
+
+    @Test
+    fun logsWithCountCarriesLineLimit() {
+        assertEquals(listOf(ShellEffect.ExportLogs(200)), parse("/logs 200", session).effects)
+        assertEquals(listOf(ShellEffect.ExportLogs(1)), parse("/logs 1", shell).effects)
+        assertEquals(listOf(ShellEffect.ExportLogs(APP_LOG_MAX_LINES)), parse("/logs 500", session).effects)
+    }
+
+    @Test
+    fun logsRejectsInvalidLineCount() {
+        listOf("/logs 0", "/logs 501", "/logs abc", "/logs -3").forEach { input ->
+            val result = parse(input, session)
+            assertTrue("$input 应被拒绝", result.effects.isEmpty())
+            assertTrue(result.text().contains("行数无效"))
+        }
+        assertTrue(parse("/logs 1 2", session).text().contains("用法：/logs [行数]"))
+    }
+
     @Test
     fun statusKeepsSnapshotTextAndEmitsExtraQuery() {
         val result = parse("/status", session)

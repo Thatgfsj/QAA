@@ -114,6 +114,9 @@ interface TerminalAgentPort {
     /** /export [路径]：当前分支导出为微调轨迹 JSONL，返回中文回执（行数 / 剔除统计）。 */
     suspend fun exportTrace(path: String?): String
 
+    /** /logs [行数]：把应用内环形日志导出到沙盒 exports/logs/，返回中文回执（行数 / 落点）。 */
+    suspend fun exportLogs(lines: Int?): String
+
     /** /status 附加上半段之外的运行态信息（模型清单数、会话树、队列）。 */
     suspend fun statusExtra(): String
 }

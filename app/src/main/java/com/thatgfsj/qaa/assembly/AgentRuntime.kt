@@ -19,6 +19,7 @@ import com.thatgfsj.qaa.core.harness.SteerQueue
 import com.thatgfsj.qaa.core.harness.SteerTurnDriver
 import com.thatgfsj.qaa.core.harness.ToolCall
 import com.thatgfsj.qaa.core.harness.TreeSessionStore
+import com.thatgfsj.qaa.core.harness.summarizeToolCall
 import com.thatgfsj.qaa.core.inference.AndroidAssetSource
 import com.thatgfsj.qaa.core.inference.AssetModelReleaser
 import com.thatgfsj.qaa.core.inference.CatalogEntry
@@ -270,6 +271,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
         if (engine.isLoaded.value && loadedModelSource == path) return "模型已在运行：${entry.name}"
         // 切换耗时由运行链状态流广播：终端占位行据此出现 / 移除，UI 不做耗时估算。
+        AppLog.modelLoadStart(entry.name)
         _modelLoad.value = TerminalModelLoadState.Loading(entry.name)
         val result = try {
             engine.load(path, LlmLoadConfig(backend = backend))
@@ -280,9 +282,13 @@ class AgentRuntime private constructor(private val appContext: Context) :
         return result.fold(
             onSuccess = {
                 _status.value = READY_TEXT
+                AppLog.modelLoaded(entry.name, "后端 ${backend.displayName()}")
                 "模型已载入：${entry.name}（${entry.quantization ?: "未知量化"}）"
             },
-            onFailure = { "模型加载失败：${it.message ?: it::class.simpleName}" },
+            onFailure = {
+                AppLog.modelLoadFailed(entry.name, it.message ?: it::class.simpleName.orEmpty())
+                "模型加载失败：${it.message ?: it::class.simpleName}"
+            },
         )
     }
 
@@ -291,7 +297,14 @@ class AgentRuntime private constructor(private val appContext: Context) :
         if (engine.isLoaded.value && turnMutex.isLocked) {
             return "轮次进行中：暂不能切换后端，请等本轮结束后重试。"
         }
-        return when (val result = backendSwitcher.apply(loadedModelSource, backend, request)) {
+        val switched = backendSwitcher.apply(loadedModelSource, backend, request)
+        // 降级链命中（含回滚）单独按 WARN 记录，便于 /logs 里一眼定位。
+        AppLog.backend(
+            request = request.displayName,
+            result = switched.message,
+            fallback = switched is BackendSwitchResult.RolledBack,
+        )
+        return when (val result = switched) {
             is BackendSwitchResult.Deferred -> {
                 backend = result.next
                 result.message
@@ -312,6 +325,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         sessionStore = store
         toolGateway.rebindSession(store.sessionId)
         previous.close()
+        AppLog.sessionOpened(store.sessionId)
         return "已新建会话：${store.sessionId}（清屏完成；旧会话 ${previous.sessionId} 的记录已保留）。"
     }
 
@@ -368,10 +382,35 @@ class AgentRuntime private constructor(private val appContext: Context) :
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                AppLog.error(ERROR_EXPORT, error.message ?: error::class.simpleName.orEmpty())
                 return "导出失败：" + (error.message ?: error::class.simpleName) + "（目标：$target）"
             }
         }
+        AppLog.exportTrace(target, if (line == null) 0 else 1)
         return describeTraceExport(target, stats, if (line == null) 0 else 1)
+    }
+
+    /**
+     * /logs [行数]：把应用内环形日志最近 N 行导出到沙盒 exports/logs/log-<时间戳>.txt。
+     *
+     * 落点与写路径复用 #90 的沙盒写通道（自动建目录）；
+     * 行数超过缓冲容量时按实际行数导出，回执里给出真实行数与缓冲占用。
+     */
+    override suspend fun exportLogs(lines: Int?): String {
+        val requested = lines ?: APP_LOG_DEFAULT_LINES
+        val records = AppRingLog.global.snapshot(requested)
+        val now = System.currentTimeMillis()
+        val target = appLogExportPath(now)
+        return try {
+            sandbox.writeText(target, formatAppLogExport(records, now, AppRingLog.global.size))
+            AppLog.logsExported(target, records.size, AppRingLog.global.size)
+            describeLogExport(target, records.size, AppRingLog.global.size)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            AppLog.error(ERROR_LOG_EXPORT, error.message ?: error::class.simpleName.orEmpty())
+            "日志导出失败：${error.message ?: error::class.simpleName}（目标：$target）"
+        }
     }
 
     override suspend fun statusExtra(): String {
@@ -481,6 +520,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            AppLog.error(ERROR_TURN, error.message ?: error::class.simpleName.orEmpty())
             emitNotice("本轮执行失败：${error.message ?: error::class.simpleName}")
         } finally {
             runCatching { safePointCompact() }
@@ -505,7 +545,10 @@ class AgentRuntime private constructor(private val appContext: Context) :
             _status.value = "正在释放内置模型资源…"
             val released = releaser.releaseAll()
             _status.value = "正在初始化推理 SDK…"
-            sdkClient.initialize().getOrThrow()
+            sdkClient.initialize()
+                .onSuccess { AppLog.sdkInit(true) }
+                .onFailure { AppLog.sdkInit(false, it.message ?: it::class.simpleName.orEmpty()) }
+                .getOrThrow()
             val source = released.firstOrNull()
                 ?: File(modelsDir, ModelCatalog.BUILT_IN_FILE_NAME).takeIf { it.isFile }
             if (source == null) {
@@ -513,19 +556,30 @@ class AgentRuntime private constructor(private val appContext: Context) :
                 return@withLock
             }
             _status.value = "正在加载模型 ${source.name}…"
+            AppLog.modelLoadStart(source.name)
             _modelLoad.value = TerminalModelLoadState.Loading(source.name)
-            try {
-                engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).getOrThrow()
+            val loadFailure = try {
+                engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).exceptionOrNull()
             } finally {
                 _modelLoad.value = TerminalModelLoadState.Idle
             }
+            if (loadFailure != null) {
+                AppLog.modelLoadFailed(
+                    source.name,
+                    loadFailure.message ?: loadFailure::class.simpleName.orEmpty(),
+                )
+                fail("启动失败：${loadFailure.message ?: loadFailure::class.simpleName}")
+                return@withLock
+            }
             loadedModelSource = source.absolutePath
+            AppLog.modelLoaded(source.name, "后端 ${backend.displayName()}")
             initialized = true
             _state.value = TerminalAgentState.IDLE
             _status.value = READY_TEXT
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            AppLog.error(ERROR_INIT, error.message ?: error::class.simpleName.orEmpty())
             fail("启动失败：${error.message ?: error::class.simpleName}")
         }
     }
@@ -606,6 +660,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
         const val PREPARING_TEXT = "正在准备运行环境…"
         const val READY_TEXT = "就绪"
 
+        /** 运行链错误短码（写入应用内日志，便于 /logs 里检索）。 */
+        const val ERROR_INIT = "E_INIT"
+        const val ERROR_TURN = "E_TURN"
+        const val ERROR_EXPORT = "E_EXPORT"
+        const val ERROR_LOG_EXPORT = "E_LOG_EXPORT"
+
         private const val NO_MODEL_HINT = "未找到可用模型"
 
         /**
@@ -678,6 +738,12 @@ private class DelegatingConfirmationGate : ConfirmationGate {
         delegate = gate
     }
 
-    override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision =
-        delegate?.awaitConfirmation(call) ?: ConfirmationDecision.DENY
+    override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision {
+        val decision = delegate?.awaitConfirmation(call) ?: ConfirmationDecision.DENY
+        AppLog.confirmDecision(
+            description = summarizeToolCall(call),
+            allowed = decision == ConfirmationDecision.ALLOW,
+        )
+        return decision
+    }
 }

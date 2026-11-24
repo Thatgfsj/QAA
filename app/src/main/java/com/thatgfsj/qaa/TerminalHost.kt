@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.thatgfsj.qaa.assembly.AgentEventKind
 import com.thatgfsj.qaa.assembly.AgentRuntime
+import com.thatgfsj.qaa.assembly.AppLog
 import com.thatgfsj.qaa.assembly.AssistantStreamEvent
 import com.thatgfsj.qaa.feature.terminal.TerminalScreen
 import com.thatgfsj.qaa.feature.terminal.TerminalShellController
@@ -43,6 +44,7 @@ fun TerminalHost(
     // 会话级自动决策（#93）生效时回显一行中文提示：自动放行 / 拒绝不留静默痕迹。
     val confirmGate = remember(terminalViewModel, scope) {
         TerminalUiGate(terminalViewModel) { description, policy ->
+            AppLog.confirmAuto(description, policy.displayLabel)
             scope.launch {
                 terminalViewModel.appendOutput("已按会话级${policy.displayLabel}执行：$description")
             }
