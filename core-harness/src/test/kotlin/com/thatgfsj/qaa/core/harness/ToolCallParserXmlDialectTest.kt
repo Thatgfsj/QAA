@@ -211,12 +211,141 @@ class ToolCallParserXmlDialectTest {
         assertTrue(reason(text).contains("嵌套"))
     }
 
+    // ------------------------------------------- Issue #108 边界收敛（实体/闭合/空白/重复键/混合）
+
     @Test
-    fun F12_HTML实体形态当前不识别_锁定为NoToolCall() {
-        // HTML 实体反转义归 issue #108；此处锁定当前行为，避免日后静默变成误执行。
+    fun E1_HTML实体整块形态可提取() {
+        // Issue #108 第 1 条：整块被写成 &lt;tool_call&gt; 时先反转义再按 L0 提取（原 F12 锁定已作废）。
         val text = "&lt;tool_call&gt;read&lt;arg_key&gt;path&lt;/arg_key&gt;" +
             "&lt;arg_value&gt;a.txt&lt;/arg_value&gt;&lt;/tool_call&gt;"
+        val call = calls(text).single()
+        assertEquals("read", call.tool)
+        expectArgs(call, "path" to "a.txt")
+    }
+
+    @Test
+    fun E2_arg_value内五类实体还原() {
+        // Issue #108 第 1 条：&amp; &lt; &gt; &quot; &#39; 全部还原，其余文本原样。
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value>""" +
+            """<arg_key>content</arg_key><arg_value>a &amp; b &lt;tag&gt; &quot;q&quot; &#39;s&#39;</arg_value></tool_call>"""
+        val call = calls(text).single()
+        expectArgs(call, "path" to "a.txt", "content" to """a & b <tag> "q" 's'""")
+    }
+
+    @Test
+    fun E3_实体整块未知工具_仍转Invalid() {
+        // 反转义得到非法调用时不得静默当终答（Issue #108 第 2/6 条）。
+        val text = "&lt;tool_call&gt;hack&lt;arg_key&gt;a&lt;/arg_key&gt;" +
+            "&lt;arg_value&gt;b&lt;/arg_value&gt;&lt;/tool_call&gt;"
+        assertTrue(reason(text).contains("未知工具：hack"))
+    }
+
+    @Test
+    fun E4_围栏内的实体块不执行() {
+        val text = "```xml\n" +
+            "&lt;tool_call&gt;read&lt;arg_key&gt;path&lt;/arg_key&gt;" +
+            "&lt;arg_value&gt;etc/hosts&lt;/arg_value&gt;&lt;/tool_call&gt;\n```"
         assertEquals(ParseOutcome.NoToolCall, parser.parse(text))
+    }
+
+    @Test
+    fun E5_散文里的实体示例不执行() {
+        // 说明语境在反转义后的文本上重新判定，仍未执行（Issue #108 第 5 条）。
+        val text = "示例：&lt;tool_call&gt;read&lt;arg_key&gt;path&lt;/arg_key&gt;" +
+            "&lt;arg_value&gt;etc/hosts&lt;/arg_value&gt;&lt;/tool_call&gt;"
+        assertEquals(ParseOutcome.NoToolCall, parser.parse(text))
+    }
+
+    @Test
+    fun E6_实体转义开标签截断_不得静默NoToolCall() {
+        assertTrue(reason("我先调用 &lt;tool_call").contains("实体转义"))
+    }
+
+    @Test
+    fun E7_Qwen参数值实体还原() {
+        val text = """<tool_call><function=write><parameter=path>a.txt</parameter>""" +
+            """<parameter=content>1 &lt; 2 &amp;&amp; 3 &gt; 2</parameter></function></tool_call>"""
+        expectArgs(calls(text).single(), "path" to "a.txt", "content" to "1 < 2 && 3 > 2")
+    }
+
+    @Test
+    fun N2_函数标签缺失或畸形_不得静默NoToolCall() {
+        // Issue #108 第 2 条：R6 类静默吞调用，缺 <function= 或标签未闭合时必须转 Invalid。
+        assertTrue(reason("<tool_call><function=writ").contains("XML 函数标签缺少工具名"))
+        assertTrue(
+            reason("<tool_call><parameter=a>b</parameter></tool_call>").contains("XML 函数标签缺少工具名"),
+        )
+    }
+
+    @Test
+    fun N3_闭合标签内空白仍可解析() {
+        // Issue #108 第 2 条（非法闭合）：</arg_key > / </arg_value > / </tool_call > 均容忍。
+        val text = "<tool_call>write<arg_key>path</arg_key ><arg_value>a.txt</arg_value ></tool_call >"
+        val call = calls(text).single()
+        assertEquals("write", call.tool)
+        expectArgs(call, "path" to "a.txt")
+    }
+
+    @Test
+    fun N4_多余或不匹配的闭合标签不破坏调用() {
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value></function></tool_call>"""
+        expectArgs(calls(text).single(), "path" to "a.txt")
+    }
+
+    @Test
+    fun N5_值内闭合字面量_按首个闭合截断_锁定策略() {
+        // Issue #108 第 4 条建议“取最后一个闭合”，但会吞并后续参数，此处锁定首闭合策略并记录差异。
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a</arg_value>b</arg_value></tool_call>"""
+        expectArgs(calls(text).single(), "path" to "a")
+    }
+
+    @Test
+    fun W1_Qwen多行参数保留缩进与行尾空白() {
+        // Issue #108 第 3 条：只剥模板两端的排版换行，多行值不得 trim。
+        val text = "<tool_call><function=write><parameter=path>a.txt</parameter>" +
+            "<parameter=content>\n    indented line\n  second  \n</parameter></function></tool_call>"
+        val call = calls(text).single()
+        expectArgs(call, "path" to "a.txt", "content" to "    indented line\n  second  ")
+    }
+
+    @Test
+    fun W2_单行参数维持既有trim() {
+        val text = "<tool_call><function=read><parameter=path> a.txt </parameter></function></tool_call>"
+        expectArgs(calls(text).single(), "path" to "a.txt")
+    }
+
+    @Test
+    fun W3_arg_value多行文本原样保留() {
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value>""" +
+            "<arg_key>content</arg_key><arg_value>line1\nline2\n</arg_value></tool_call>"
+        expectArgs(calls(text).single(), "path" to "a.txt", "content" to "line1\nline2\n")
+    }
+
+    @Test
+    fun D1_重复参数名后者覆盖前者() {
+        // Issue #108 第 4 条：同名 key 重复时后者覆盖，两种方言一致。
+        val arg = "<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value>" +
+            "<arg_key>path</arg_key><arg_value>b.txt</arg_value></tool_call>"
+        expectArgs(calls(arg).single(), "path" to "b.txt")
+        val qwen = "<tool_call><function=read><parameter=path>a.txt</parameter>" +
+            "<parameter=path>b.txt</parameter></function></tool_call>"
+        expectArgs(calls(qwen).single(), "path" to "b.txt")
+    }
+
+    @Test
+    fun M1_XML非法与裸JSON混合_以JSON为准() {
+        // Issue #108 第 5 条：XML 的 Invalid 不得抢占可执行的 JSON 调用（沿用评审 P1-1 语义）。
+        val text = """<tool_call>hack<arg_key>a</arg_key><arg_value>b</arg_value></tool_call>""" +
+            """ 正确做法是：{"tool":"read","args":{"path":"a.txt"}}"""
+        assertEquals("read", calls(text).single().tool)
+    }
+
+    @Test
+    fun M2_XML与JSON同时存在_维持L0优先() {
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value></tool_call>""" +
+            """ 另外 {"tool":"read","args":{"path":"b.txt"}}"""
+        val call = calls(text).single()
+        assertEquals("write", call.tool)
     }
 
     @Test
