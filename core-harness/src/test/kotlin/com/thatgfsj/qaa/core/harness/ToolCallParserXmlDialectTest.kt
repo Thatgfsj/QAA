@@ -42,7 +42,8 @@ class ToolCallParserXmlDialectTest {
         val text = """<tool_call>write<arg_key>content</arg_key><arg_value>QAA-real-device-test</arg_value><arg_key>path</arg_key><arg_value>test.txt</arg_value></tool_call>"""
         val call = calls(text).single()
         assertEquals("write", call.tool)
-        expectArgs(call, "content" to "QAA-real-device-test", "path" to "test.txt")
+        // 直接比较序列化串，锁定参数顺序（content 在 path 前；Map 相等证明不了顺序，评审 P2）。
+        assertEquals("""{"content":"QAA-real-device-test","path":"test.txt"}""", call.argsJson)
     }
 
     @Test
@@ -97,7 +98,7 @@ class ToolCallParserXmlDialectTest {
     @Test
     fun X6_截断到无法修复_判定失败() {
         // 子标签被截断（arg_key 连开标签都没闭合），无从恢复参数 → 纠错重试。
-        assertTrue(reason("<tool_call>write<arg_key").contains("<arg_key"))
+        assertTrue(reason("<tool_call>write<arg_key").contains("工具调用痕迹"))
         // 只有 arg_value 没有 arg_key，无法配对参数。
         assertTrue(reason("""<tool_call>write<arg_value>x</arg_value></tool_call>""").contains("缺少参数"))
         // 工具名为空。
@@ -146,5 +147,89 @@ class ToolCallParserXmlDialectTest {
         assertEquals(ParseOutcome.NoToolCall, parser.parse("今天天气不错，直接回答即可。"))
         assertEquals(ParseOutcome.NoToolCall, parser.parse("好的。"))
         assertEquals(ParseOutcome.NoToolCall, parser.parse("步骤 [1] 已完成，接着做 [2]。"))
+    }
+    @Test
+    fun F1_评审P0_畸形参数标签不抛异常() {
+        // 评审 P0：<parameter=x</function> 被开标签正则吃进名称，曾抛 StringIndexOutOfBoundsException。
+        val text = "<tool_call><function=write><parameter=a>b</parameter><parameter=x</function></tool_call>"
+        val outcome = parser.parse(text)
+        assertTrue("期望 Invalid，实际 \$outcome", outcome is ParseOutcome.Invalid)
+        assertTrue(outcome.toString(), outcome.toString().contains("XML 参数标签畸形"))
+    }
+
+    @Test
+    fun F7_评审P1_1_XML_Invalid不抢占JSON管线() {
+        // ① XML 块字段非法（未知工具）只暂存，后续 JSON 围栏是合法调用 → 以 JSON 为准。
+        val wrapped = """<tool_call>hack<arg_key>a</arg_key><arg_value>b</arg_value></tool_call>""" +
+            " 不过正确做法是：\n```json\n" +
+            """{"tool":"read","args":{"path":"a.txt"}}""" +
+            "\n```"
+        assertEquals("read", calls(wrapped).single().tool)
+        // ② 评审原始复现：说明句里的 arg 标签 + JSON 围栏，行为应为 Calls(read)。
+        val prose = "说明句里出现 <arg_key>k</arg_key><arg_value>v</arg_value>，后面接 JSON：\n" +
+            "```json\n" +
+            """{"tool":"read","args":{"path":"a.txt"}}""" +
+            "\n```"
+        assertEquals("read", calls(prose).single().tool)
+    }
+
+    @Test
+    fun F2_评审P1_2_示例句中的XML块不执行() {
+        val text = "示例：" +
+            """<tool_call>read<arg_key>path</arg_key><arg_value>etc/hosts</arg_value></tool_call>""" +
+            " 这样写即可。"
+        assertEquals(ParseOutcome.NoToolCall, parser.parse(text))
+    }
+
+    @Test
+    fun F3_评审P1_2_围栏里的XML块不执行() {
+        val text = "```xml\n" +
+            """<tool_call>read<arg_key>path</arg_key><arg_value>etc/hosts</arg_value></tool_call>""" +
+            "\n```"
+        assertEquals(ParseOutcome.NoToolCall, parser.parse(text))
+    }
+
+    @Test
+    fun F4_评审P1_3_散文提及arg标签不误判() {
+        assertEquals(
+            ParseOutcome.NoToolCall,
+            parser.parse("参数用 <arg_key> 与 <arg_value> 包裹，成对出现。"),
+        )
+    }
+
+    @Test
+    fun F5_评审P1_3_散文提及function形态不误判() {
+        assertEquals(
+            ParseOutcome.NoToolCall,
+            parser.parse("函数写作 <function=name><parameter=k>v</parameter></function> 的形式。"),
+        )
+    }
+
+    @Test
+    fun F6_嵌套tool_call被拒绝() {
+        val text = """<tool_call>read<arg_key>path</arg_key><arg_value><tool_call>write<arg_key>path</arg_key><arg_value>b.txt</arg_value></tool_call></arg_value></tool_call>"""
+        assertTrue(reason(text).contains("嵌套"))
+    }
+
+    @Test
+    fun F12_HTML实体形态当前不识别_锁定为NoToolCall() {
+        // HTML 实体反转义归 issue #108；此处锁定当前行为，避免日后静默变成误执行。
+        val text = "&lt;tool_call&gt;read&lt;arg_key&gt;path&lt;/arg_key&gt;" +
+            "&lt;arg_value&gt;a.txt&lt;/arg_value&gt;&lt;/tool_call&gt;"
+        assertEquals(ParseOutcome.NoToolCall, parser.parse(text))
+    }
+
+    @Test
+    fun F15_多块全部未知工具_返回首个Invalid() {
+        val text = """<tool_call>hack1<arg_key>a</arg_key><arg_value>b</arg_value></tool_call>""" +
+            """<tool_call>hack2<arg_key>c</arg_key><arg_value>d</arg_value></tool_call>"""
+        assertTrue(reason(text).contains("未知工具：hack1"))
+    }
+
+    @Test
+    fun P2真机arg_value保留首尾空白() {
+        val text = """<tool_call>write<arg_key>path</arg_key><arg_value>a.txt</arg_value><arg_key>content</arg_key><arg_value>  hi  </arg_value></tool_call>"""
+        val call = calls(text).single()
+        assertEquals("""{"path":"a.txt","content":"  hi  "}""", call.argsJson)
     }
 }
