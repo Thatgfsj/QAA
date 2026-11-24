@@ -20,6 +20,8 @@ sealed interface ParseOutcome {
 
 /**
  * 工具调用解析器（设计文档 4.2 五级提取管线，任一级成功即停）：
+ * 0. XML 方言提取（Issue #107）：`<tool_call>` 内 JSON、Qwen 系
+ *    `<function=…><parameter=…>`、真机 `arg_key/arg_value` 三种形态，宽容缺闭合标签；
  * 1. 代码围栏剥离：```json 与裸围栏一视同仁；多围栏取第一个含工具键的；
  * 2. 首花括号定位：容忍前置闲聊，从首个 `{` 起截取；顶层数组 `[` 同样纳入；
  * 3. 括号配平扫描：按栈扫描，字符串字面量与转义引号不参与配平；
@@ -32,12 +34,30 @@ sealed interface ParseOutcome {
 class ToolCallParser {
 
     /**
-     * 解析一次模型输出。无任何 `{`/`[` 的纯文本判定为终答（[ParseOutcome.NoToolCall]）；
+     * 解析一次模型输出：先按 XML 方言（L0）提取，再走既有 JSON 五级管线（L1–L5）。
+     * 无任何 `{`/`[` 的纯文本在无工具痕迹时判定为终答（[ParseOutcome.NoToolCall]）；
      * 含疑似调用但提取/校验失败时返回 [ParseOutcome.Invalid]，由 AgentLoop 回注纠错提示。
      */
     fun parse(text: String): ParseOutcome {
         if (text.isBlank()) return ParseOutcome.Invalid("空输入，未解析出工具调用")
 
+        // L0：XML 方言（Issue #107 真机形态）任一变体成功即停；字段非法同样走纠错。
+        when (val xml = extractXmlDialect(text)) {
+            is ParseOutcome.Calls -> return xml
+            is ParseOutcome.Invalid -> return xml
+            ParseOutcome.NoToolCall -> Unit
+        }
+
+        val json = extractJsonPipeline(text)
+        // 静默吞调用修复（Issue #107）：提取失败但文本残留工具痕迹时不得当终答，转 Invalid 纠错。
+        if (json == ParseOutcome.NoToolCall) {
+            toolTraceReason(text)?.let { return ParseOutcome.Invalid(it) }
+        }
+        return json
+    }
+
+    /** 既有 L1–L5 JSON 提取管线；语义与历史版本保持一致。 */
+    private fun extractJsonPipeline(text: String): ParseOutcome {
         val fences = fencedBlocks(text)
         // L1：第一个含工具键的围栏即本次调用的候选；其失败直接走纠错，不再猜测其它围栏。
         val preferredIndex = fences.indexOfFirst { looksLikeToolPayload(it) }
@@ -57,6 +77,175 @@ class ToolCallParser {
         // L2：围栏之外仍可能有裸 JSON，回到全文从首个花括号（或顶层数组）定位。
         return extract(text)
     }
+
+    // ---------------------------------------------------------------- L0 XML 方言
+
+    /**
+     * L0：XML 方言提取（Issue #107 真机形态），任一变体产出合法调用即返回：
+     * 1. `<tool_call>{JSON}</tool_call>`：载荷为 JSON 对象/数组时复用 L1–L5 提取与字段校验；
+     * 2. `<tool_call><function=NAME><parameter=K>V</parameter>…</function></tool_call>`（Qwen 系）；
+     * 3. `<tool_call>NAME<arg_key>K</arg_key><arg_value>V</arg_value>…</tool_call>`（真机形态）；
+     * 4. 宽容：缺 `</tool_call>`、缺子标签闭合、多个块逐个尝试，取首个通过白名单校验的调用；
+     *    字段非法（未知工具等）返回 Invalid，交 AgentLoop 纠错重试。
+     */
+    private fun extractXmlDialect(text: String): ParseOutcome {
+        var cursor = 0
+        var blocks = 0
+        var firstInvalid: String? = null
+        while (cursor < text.length) {
+            val open = XML_TOOL_OPEN.find(text, cursor) ?: break
+            blocks++
+            val bodyStart = open.range.last + 1
+            val close = text.indexOf(XML_TOOL_CLOSE_TAG, bodyStart)
+            cursor = if (close < 0) text.length else close + XML_TOOL_CLOSE_TAG.length
+            val bodyEnd = if (close < 0) text.length else close
+            when (val outcome = parseXmlBody(text.substring(bodyStart, bodyEnd))) {
+                is ParseOutcome.Calls -> return outcome
+                is ParseOutcome.Invalid -> if (firstInvalid == null) firstInvalid = outcome.reason
+                ParseOutcome.NoToolCall -> Unit
+            }
+        }
+        // 无 <tool_call> 包裹时，裸方言（Qwen function/parameter、真机 arg_key）同样提取。
+        val bare = blocks == 0 && (
+            text.contains(XML_FUNCTION_PREFIX) ||
+                text.contains(XML_PARAMETER_PREFIX) ||
+                text.contains(XML_ARG_KEY_PREFIX)
+            )
+        if (bare) {
+            when (val outcome = parseXmlBody(text)) {
+                is ParseOutcome.Calls -> return outcome
+                is ParseOutcome.Invalid -> return outcome
+                ParseOutcome.NoToolCall -> Unit
+            }
+        }
+        return firstInvalid?.let { ParseOutcome.Invalid(it) } ?: ParseOutcome.NoToolCall
+    }
+
+    /** 按载荷特征选择 XML 变体；纯 JSON 载荷交给既有 L1–L5 管线。 */
+    private fun parseXmlBody(body: String): ParseOutcome {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) return ParseOutcome.NoToolCall
+        return when {
+            trimmed.contains(XML_FUNCTION_PREFIX) || trimmed.contains(XML_PARAMETER_PREFIX) ->
+                parseFunctionDialect(trimmed)
+            trimmed.contains(XML_ARG_KEY_OPEN) || trimmed.contains(XML_ARG_VALUE_OPEN) ->
+                parseArgDialect(trimmed)
+            else -> extract(trimmed)
+        }
+    }
+
+    /** Qwen 系：`<function=NAME><parameter=K>V</parameter>…</function>`。 */
+    private fun parseFunctionDialect(source: String): ParseOutcome {
+        val function = XML_FUNCTION_OPEN.find(source) ?: return ParseOutcome.NoToolCall
+        val name = function.groupValues[1].trim()
+        if (name.isEmpty()) return ParseOutcome.Invalid(XML_MISSING_NAME)
+        val bodyStart = function.range.last + 1
+        val close = source.indexOf(XML_FUNCTION_CLOSE, bodyStart)
+        val bodyEnd = if (close < 0) source.length else close
+        val args = linkedMapOf<String, JsonElement>()
+        var cursor = bodyStart
+        while (cursor < bodyEnd) {
+            val parameter = XML_PARAMETER_OPEN.find(source, cursor) ?: break
+            if (parameter.range.first >= bodyEnd) break
+            val key = parameter.groupValues[1].trim()
+            val valueStart = parameter.range.last + 1
+            val (rawValue, after) = readXmlValue(source, valueStart, XML_PARAMETER_CLOSE, bodyEnd)
+            if (key.isNotEmpty()) args[key] = JsonPrimitive(rawValue.trim())
+            cursor = after.coerceAtLeast(valueStart)
+        }
+        if (args.isEmpty()) return ParseOutcome.Invalid(XML_MISSING_ARGS)
+        return validateCall(JsonObject(mapOf(KEY_TOOL to JsonPrimitive(name), KEY_ARGS to JsonObject(args))))
+    }
+
+    /** 真机形态：`NAME<arg_key>K</arg_key><arg_value>V</arg_value>…`，允许缺闭合标签。 */
+    private fun parseArgDialect(source: String): ParseOutcome {
+        val firstKey = source.indexOf(XML_ARG_KEY_OPEN)
+        val firstValue = source.indexOf(XML_ARG_VALUE_OPEN)
+        val firstTag = when {
+            firstKey < 0 -> firstValue
+            firstValue < 0 -> firstKey
+            else -> minOf(firstKey, firstValue)
+        }
+        if (firstTag < 0) return ParseOutcome.NoToolCall
+        val name = source.substring(0, firstTag).trim().trim('"', '\'', '`')
+        if (name.isEmpty()) return ParseOutcome.Invalid(XML_MISSING_NAME)
+        val args = linkedMapOf<String, JsonElement>()
+        var pendingKey: String? = null
+        var cursor = firstTag
+        while (cursor < source.length) {
+            val keyAt = source.indexOf(XML_ARG_KEY_OPEN, cursor)
+            val valueAt = source.indexOf(XML_ARG_VALUE_OPEN, cursor)
+            val next = when {
+                keyAt < 0 -> valueAt
+                valueAt < 0 -> keyAt
+                else -> minOf(keyAt, valueAt)
+            }
+            if (next < 0) break
+            if (next == keyAt) {
+                val valueStart = keyAt + XML_ARG_KEY_OPEN.length
+                val (rawKey, after) = readXmlValue(source, valueStart, XML_ARG_KEY_CLOSE, source.length)
+                pendingKey = rawKey.trim()
+                cursor = after.coerceAtLeast(valueStart)
+            } else {
+                val valueStart = valueAt + XML_ARG_VALUE_OPEN.length
+                val (rawValue, after) = readXmlValue(source, valueStart, XML_ARG_VALUE_CLOSE, source.length)
+                cursor = after.coerceAtLeast(valueStart)
+                val key = pendingKey ?: continue
+                if (key.isNotEmpty()) args[key] = JsonPrimitive(rawValue.trim())
+                pendingKey = null
+            }
+        }
+        if (args.isEmpty()) return ParseOutcome.Invalid(XML_MISSING_ARGS)
+        return validateCall(JsonObject(mapOf(KEY_TOOL to JsonPrimitive(name), KEY_ARGS to JsonObject(args))))
+    }
+
+    /** 读取 XML 方言的值：优先取到 [closeTag]；缺闭合时止于下一个 XML 标签或 [limit]。 */
+    private fun readXmlValue(source: String, start: Int, closeTag: String, limit: Int): Pair<String, Int> {
+        val close = source.indexOf(closeTag, start)
+        if (close >= start && close < limit) return source.substring(start, close) to close + closeTag.length
+        val boundary = XML_VALUE_BOUNDARY.find(source, start)
+        val end = if (boundary != null && boundary.range.first < limit) boundary.range.first else limit
+        return source.substring(start, end) to end
+    }
+
+    // -------------------------------------------------- 工具痕迹探测（静默吞调用修复）
+
+    /**
+     * 工具痕迹探测（Issue #107 补充要求）：L0 与 L1–L5 都未提取出合法调用时，若文本仍残留
+     * 工具调用迹象则返回 Invalid 原因，避免“解析失败 → 当纯文本终答”的静默吞调用。
+     *
+     * 判据保守化：裸词 `tool_call`（文档/说明中的提及）不算痕迹；`<tool_call>` 仅当其后载荷以
+     * ASCII 工具名或 JSON（`{`/`[`/字母数字）起头时才计入，避免把中文说明句误判为调用。
+     */
+    private fun toolTraceReason(text: String): String? = when {
+        text.contains(XML_ARG_KEY_PREFIX) || text.contains(XML_ARG_VALUE_PREFIX) ->
+            "检测到 XML 工具调用痕迹（<arg_key>/<arg_value>），但未提取出合法调用"
+        text.contains(XML_FUNCTION_PREFIX) || text.contains(XML_PARAMETER_PREFIX) ->
+            "检测到 XML 工具调用痕迹（<function=/<parameter=），但未提取出合法调用"
+        hasCallLikeToolCallPayload(text) ||
+            text.trimEnd().endsWith(XML_TOOL_CALL_PREFIX) ||
+            text.trimEnd().endsWith(XML_TOOL_OPEN_TAG) ->
+            "检测到 <tool_call> 标签，但未提取出合法调用"
+        !text.contains('{') && BARE_TOOL_KEY.containsMatchIn(text) && BARE_ARGS_KEY.containsMatchIn(text) ->
+            "检测到工具调用片段（tool/args 键），但未形成合法 JSON"
+        else -> null
+    }
+
+    /** `<tool_call>` 之后的第一个非空白字符是否像调用载荷（工具名或 JSON 起头）。 */
+    private fun hasCallLikeToolCallPayload(text: String): Boolean {
+        var cursor = 0
+        while (cursor < text.length) {
+            val open = XML_TOOL_OPEN.find(text, cursor) ?: return false
+            var index = open.range.last + 1
+            while (index < text.length && text[index].isWhitespace()) index++
+            if (index < text.length && isCallPayloadStart(text[index])) return true
+            cursor = open.range.last + 1
+        }
+        return false
+    }
+
+    private fun isCallPayloadStart(char: Char): Boolean =
+        char in 'a'..'z' || char in 'A'..'Z' || char in '0'..'9' || char == '{' || char == '['
 
     // ---------------------------------------------------------------- L1 围栏剥离
 
@@ -311,6 +500,34 @@ class ToolCallParser {
         private const val JSON_PARSE_FAILED = "JSON 解析失败"
         private const val MISMATCH_REASON = "JSON 括号不匹配"
         private const val REPAIR_STILL_INVALID = "JSON 截断补全后仍无法解析"
+
+        private const val XML_TOOL_CLOSE_TAG = "</tool_call>"
+        private const val XML_TOOL_CALL_PREFIX = "<tool_call"
+        private const val XML_TOOL_OPEN_TAG = "<tool_call>"
+        private const val XML_ARG_KEY_OPEN = "<arg_key>"
+        private const val XML_ARG_KEY_CLOSE = "</arg_key>"
+        private const val XML_ARG_KEY_PREFIX = "<arg_key"
+        private const val XML_ARG_VALUE_OPEN = "<arg_value>"
+        private const val XML_ARG_VALUE_CLOSE = "</arg_value>"
+        private const val XML_ARG_VALUE_PREFIX = "<arg_value"
+        private const val XML_FUNCTION_PREFIX = "<function="
+        private const val XML_FUNCTION_CLOSE = "</function>"
+        private const val XML_PARAMETER_PREFIX = "<parameter="
+        private const val XML_PARAMETER_CLOSE = "</parameter>"
+        private const val XML_MISSING_NAME = "XML 工具调用缺少工具名"
+        private const val XML_MISSING_ARGS = "XML 工具调用缺少参数"
+
+        /** <tool_call> 开标签（允许标签名后空白）；用于方言分块。 */
+        private val XML_TOOL_OPEN = Regex("<tool_call\\s*>")
+        private val XML_FUNCTION_OPEN = Regex("<function=([^>\\s]+)\\s*>")
+        private val XML_PARAMETER_OPEN = Regex("<parameter=([^>\\s]+)\\s*>")
+
+        /** 缺闭合标签时的值边界：遇到下一个 XML 方言标签即截断。 */
+        private val XML_VALUE_BOUNDARY = Regex(
+            "<arg_key>|<arg_value>|</arg_key>|</arg_value>|<parameter=|<function=|</function>|</tool_call>"
+        )
+        private val BARE_TOOL_KEY = Regex("""["']tool["']\s*:""")
+        private val BARE_ARGS_KEY = Regex("""["'](?:args|arguments)["']\s*:""")
 
         private val LANGUAGE_TAG = Regex("^[A-Za-z0-9_+.#-]{1,16}$")
 
