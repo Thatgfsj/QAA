@@ -57,4 +57,15 @@ class TerminalUiStateTest {
         val info = TerminalModelInfo(name = "Supra2.5-Pro-Instruct", quantization = "Q4_0")
         assertEquals("Supra2.5-Pro-Instruct(Q4_0)", info.displayText)
     }
+
+    @Test
+    fun 顶栏载入中_不显示模型就绪假象() {
+        val state = TerminalUiState(modelLoad = TerminalModelLoadState.Loading("Qwen3-4B"))
+        assertEquals("[MODEL] 载入中：Qwen3-4B…", state.topBarSegments().first())
+    }
+
+    @Test
+    fun 顶栏空闲_显示模型名与量化() {
+        assertEquals("[MODEL] Supra2.5-Pro-Instruct(Q4_0)", TerminalUiState().topBarSegments().first())
+    }
 }

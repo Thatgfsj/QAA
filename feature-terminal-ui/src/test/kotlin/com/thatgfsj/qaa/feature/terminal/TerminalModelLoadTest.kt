@@ -109,6 +109,21 @@ class TerminalModelLoadTest {
     }
 
     @Test
+    fun 载入进度同步到顶栏_结束后恢复模型名() = runTest {
+        val viewModel = TerminalViewModel()
+        val source = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
+        viewModel.bindModelLoad(source)
+        advanceUntilIdle()
+        source.value = TerminalModelLoadState.Loading("Qwen3-4B")
+        advanceUntilIdle()
+        assertEquals("载入中：Qwen3-4B…", viewModel.uiState.value.topBarSegments().first().removePrefix("[MODEL] "))
+        source.value = TerminalModelLoadState.Idle
+        advanceUntilIdle()
+        assertEquals(TerminalModelLoadState.Idle, viewModel.uiState.value.modelLoad)
+        assertEquals("[MODEL] " + viewModel.uiState.value.modelInfo.displayText, viewModel.uiState.value.topBarSegments().first())
+    }
+
+    @Test
     fun 载入占位文案固定格式() {
         assertEquals("正在载入模型 Qwen3-4B…", modelLoadPlaceholderText("Qwen3-4B"))
     }

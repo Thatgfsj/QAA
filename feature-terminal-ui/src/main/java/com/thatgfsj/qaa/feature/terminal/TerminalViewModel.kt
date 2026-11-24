@@ -82,6 +82,8 @@ class TerminalViewModel internal constructor(
     fun bindModelLoad(source: StateFlow<TerminalModelLoadState>) {
         viewModelScope.launch {
             source.collect { state ->
+                // #104：载入进度同步进状态快照，供顶栏显示「载入中」而不是模型就绪假象。
+                updateState { it.copy(modelLoad = state) }
                 when (state) {
                     TerminalModelLoadState.Idle -> {
                         modelLoadText = null

@@ -241,6 +241,9 @@ class AgentRuntime private constructor(
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
     private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
+
+    /** #104 载入闸门：冷启动与切档载入串行化，轮次入口在载入期排队而不是被拒绝。 */
+    private val modelLoadGate = ModelLoadGate()
     private val backendSwitcher = BackendSwitcher(engine) { _status.value = it }
     private val contextLengthSwitcher = ContextLengthSwitcher(engine) { _status.value = it }
     private val contextLoadFallback = ContextLoadFallback(engine) { requested, failure ->
@@ -288,6 +291,11 @@ class AgentRuntime private constructor(
     // ---- TerminalAgentPort ----
 
     override suspend fun runTurn(text: String) {
+        // #104：载入期先把指令排队（回执明确告知不会丢），载入结束后本行继续执行。
+        if (modelLoadGate.isLoadInProgress) {
+            emitNotice(queuedPromptNotice(loadingModelName()))
+            modelLoadGate.awaitIdle()
+        }
         if (!ensureReady()) {
             emitNotice("模型尚未就绪：${_status.value}")
             return
@@ -326,7 +334,7 @@ class AgentRuntime private constructor(
         AppLog.modelLoadStart(entry.name)
         _modelLoad.value = TerminalModelLoadState.Loading(entry.name)
         val outcome = try {
-            loadWithContextFallback(path)
+            modelLoadGate.withLoad { loadWithContextFallback(path) }
         } finally {
             _modelLoad.value = TerminalModelLoadState.Idle
         }
@@ -717,7 +725,7 @@ class AgentRuntime private constructor(
             AppLog.modelLoadStart(source.name)
             _modelLoad.value = TerminalModelLoadState.Loading(source.name)
             val outcome = try {
-                loadWithContextFallback(source.absolutePath)
+                modelLoadGate.withLoad { loadWithContextFallback(source.absolutePath) }
             } finally {
                 _modelLoad.value = TerminalModelLoadState.Idle
             }
@@ -749,6 +757,9 @@ class AgentRuntime private constructor(
             fail("启动失败：${error.message ?: error::class.simpleName}")
         }
     }
+
+    /** 当前载入中的模型名（#104 排队回执用；无载入时为 null）。 */
+    private fun loadingModelName(): String? = (_modelLoad.value as? TerminalModelLoadState.Loading)?.name
 
     private suspend fun ensureReady(): Boolean {
         if (engine.isLoaded.value) return true
