@@ -10,6 +10,7 @@ import com.thatgfsj.qaa.core.harness.ConfirmationGate
 import com.thatgfsj.qaa.core.harness.ContextCompactor
 import com.thatgfsj.qaa.core.harness.ForkResult
 import com.thatgfsj.qaa.core.harness.JsonlTurnRecorder
+import com.thatgfsj.qaa.core.harness.LoraTraceExporter
 import com.thatgfsj.qaa.core.harness.PromptAssembler
 import com.thatgfsj.qaa.core.harness.SessionRole
 import com.thatgfsj.qaa.core.harness.SkipReason
@@ -42,6 +43,7 @@ import com.thatgfsj.qaa.core.tools.DrawImageTool
 import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
+import com.thatgfsj.qaa.feature.normal.chat.ChatMetrics
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
 import com.thatgfsj.qaa.feature.normal.models.NormalModelEntry
@@ -52,6 +54,7 @@ import com.thatgfsj.qaa.feature.terminal.LocalModelEntry
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentPort
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentState
 import com.thatgfsj.qaa.feature.terminal.TerminalMetricsSnapshot
+import com.thatgfsj.qaa.feature.terminal.TerminalModelLoadState
 import com.thatgfsj.qaa.feature.terminal.TerminalModelListPort
 import com.thatgfsj.qaa.feature.terminal.TerminalModelPullPort
 import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
@@ -67,6 +70,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -199,6 +203,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
+    private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
     private val backendSwitcher = BackendSwitcher(engine) { _status.value = it }
 
     override val state: StateFlow<TerminalAgentState> = _state.asStateFlow()
@@ -208,6 +213,9 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     /** 统计栏指标流（真实推理指标）。 */
     val metrics: StateFlow<TerminalMetricsSnapshot> = llmGateway.metrics
+
+    /** 模型载入进度流：载入开始置 Loading，结束（无论成败）回到 Idle。 */
+    override val modelLoad: StateFlow<TerminalModelLoadState> = _modelLoad.asStateFlow()
 
     /** 轮次事件流（终端逐条回显）。 */
     val events: SharedFlow<AgentEvent> = recorder.events
@@ -261,7 +269,13 @@ class AgentRuntime private constructor(private val appContext: Context) :
             ?: return "未找到本地模型：$token。输入 model 查看清单（名称或序号，内置模型为 0 号）。"
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
         if (engine.isLoaded.value && loadedModelSource == path) return "模型已在运行：${entry.name}"
-        val result = engine.load(path, LlmLoadConfig(backend = backend))
+        // 切换耗时由运行链状态流广播：终端占位行据此出现 / 移除，UI 不做耗时估算。
+        _modelLoad.value = TerminalModelLoadState.Loading(entry.name)
+        val result = try {
+            engine.load(path, LlmLoadConfig(backend = backend))
+        } finally {
+            _modelLoad.value = TerminalModelLoadState.Idle
+        }
         loadedModelSource = path
         return result.fold(
             onSuccess = {
@@ -340,6 +354,26 @@ class AgentRuntime private constructor(private val appContext: Context) :
         }.trimEnd()
     }
 
+    override suspend fun exportTrace(path: String?): String {
+        val branch = sessionStore.activeBranch()
+        val stats = traceBranchStats(branch)
+        val target = traceExportPath(sessionStore.sessionId, path)
+        val line = LoraTraceExporter.export(
+            branch = branch,
+            options = LoraTraceExporter.Options(branchLabel = sessionStore.sessionId),
+        )
+        if (line != null) {
+            try {
+                sandbox.writeText(target, line + "\n")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                return "导出失败：" + (error.message ?: error::class.simpleName) + "（目标：$target）"
+            }
+        }
+        return describeTraceExport(target, stats, if (line == null) 0 else 1)
+    }
+
     override suspend fun statusExtra(): String {
         val models = runCatching { catalog.list() }.getOrElse { emptyList() }
         val summaryCount = sessionStore.allNodes().count { it.role == SessionRole.SUMMARY }
@@ -372,6 +406,16 @@ class AgentRuntime private constructor(private val appContext: Context) :
     /** Normal 端流式片段：与 Terminal 同源 token；最终文本仍以 [ask] 返回值定稿。 */
     override val assistantTokens: Flow<String> =
         assistantStream.mapNotNull { (it as? AssistantStreamEvent.Delta)?.text }
+
+    /** Normal 会话页指标条：与终端统计栏同源，只做形状映射。 */
+    override val chatMetrics: Flow<ChatMetrics> = metrics.map { snapshot ->
+        ChatMetrics(
+            ttftMs = snapshot.ttftMs,
+            tokensPerSecond = snapshot.tokensPerSecond,
+            tokensUsed = snapshot.tokensUsed,
+            contextTokens = snapshot.contextTokens,
+        )
+    }
 
     // ---- TerminalModelListPort / TerminalModelPullPort ----
 
@@ -469,7 +513,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
                 return@withLock
             }
             _status.value = "正在加载模型 ${source.name}…"
-            engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).getOrThrow()
+            _modelLoad.value = TerminalModelLoadState.Loading(source.name)
+            try {
+                engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).getOrThrow()
+            } finally {
+                _modelLoad.value = TerminalModelLoadState.Idle
+            }
             loadedModelSource = source.absolutePath
             initialized = true
             _state.value = TerminalAgentState.IDLE
@@ -559,8 +608,20 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
         private const val NO_MODEL_HINT = "未找到可用模型"
 
-        /** 生产装配入口（applicationContext 持有，避免泄漏 Activity）。 */
-        fun create(context: Context): AgentRuntime = AgentRuntime(context.applicationContext)
+        /**
+         * 生产装配入口（applicationContext 持有，避免泄漏 Activity）。
+         *
+         * 内置技能先释放到 filesDir/skills（幂等、仅数 KB）：[SkillRegistry] 构造时即可
+         * 扫描到，断网首启也能在 /skills 与 AGENT 描述段看到内置技能。
+         */
+        fun create(context: Context): AgentRuntime {
+            val appContext = context.applicationContext
+            SkillsReleaser(
+                source = AndroidSkillsAssetSource(appContext.assets),
+                targetDir = File(appContext.filesDir, SKILLS_DIR),
+            ).release()
+            return AgentRuntime(appContext)
+        }
     }
 }
 

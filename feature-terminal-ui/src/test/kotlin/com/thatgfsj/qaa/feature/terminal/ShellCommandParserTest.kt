@@ -417,6 +417,30 @@ class ShellCommandParserTest {
     }
 
     @Test
+    fun exportWithoutPathUsesDefaultTarget() {
+        val result = parse("/export", session)
+        assertEquals(listOf(ShellEffect.ExportTrace(null)), result.effects)
+        assertTrue(result.output.isEmpty())
+    }
+
+    @Test
+    fun exportCarriesCustomPathAndRejectsExtraArguments() {
+        assertEquals(
+            listOf(ShellEffect.ExportTrace("exports/a.jsonl")),
+            parse("/export exports/a.jsonl", session).effects,
+        )
+        assertTrue(parse("/export a b", session).text().contains("用法：/export [路径]"))
+    }
+
+    @Test
+    fun exportRequiresSessionState() {
+        val result = parse("/export", shell)
+        assertTrue(result.effects.isEmpty())
+        assertTrue(result.text().contains("未知命令：/export"))
+        assertTrue(result.text().contains("chat / agent"))
+    }
+
+    @Test
     fun statusKeepsSnapshotTextAndEmitsExtraQuery() {
         val result = parse("/status", session)
         assertEquals(listOf(ShellEffect.QueryStatusExtra), result.effects)

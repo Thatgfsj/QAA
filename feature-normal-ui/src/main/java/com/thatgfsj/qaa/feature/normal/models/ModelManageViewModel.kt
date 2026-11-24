@@ -39,6 +39,10 @@ class ModelManageViewModel : ViewModel() {
     private val _portBound = MutableStateFlow(false)
     val portBound: StateFlow<Boolean> = _portBound.asStateFlow()
 
+    /** 正在载入的模型序号（null 表示空闲）：按钮据此显示载入中态。 */
+    private val _loadingOrdinal = MutableStateFlow<Int?>(null)
+    val loadingOrdinal: StateFlow<Int?> = _loadingOrdinal.asStateFlow()
+
     private var port: NormalModelPort? = null
     private var collector: Job? = null
 
@@ -53,6 +57,7 @@ class ModelManageViewModel : ViewModel() {
         _resumeTask.value = null
         _urlError.value = null
         _notice.value = null
+        _loadingOrdinal.value = null
         if (newPort == null) {
             _models.value = defaultCatalog()
             return
@@ -132,11 +137,17 @@ class ModelManageViewModel : ViewModel() {
             toggleLoaded(model.id)
             return
         }
-        if (model.ordinal <= 0) return
+        if (_loadingOrdinal.value != null) return
+        // 载入中态跟随真实挂起调用：开始置序号、结束（无论成败）复位。
+        _loadingOrdinal.value = model.ordinal
         viewModelScope.launch {
-            _notice.value = runCatching { port.loadModel(model.ordinal) }
-                .getOrElse { "模型加载失败：" + (it.message ?: it::class.simpleName) }
-            refreshModels(port)
+            try {
+                _notice.value = runCatching { port.loadModel(model.ordinal) }
+                    .getOrElse { "模型加载失败：" + (it.message ?: it::class.simpleName) }
+                refreshModels(port)
+            } finally {
+                _loadingOrdinal.value = null
+            }
         }
     }
 

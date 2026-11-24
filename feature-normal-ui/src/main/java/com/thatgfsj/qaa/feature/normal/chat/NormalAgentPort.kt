@@ -18,4 +18,7 @@ interface NormalAgentPort {
      * null 表示无流式，仅在 [ask] 返回后整段上屏。
      */
     val assistantTokens: Flow<String>? get() = null
+
+    /** 会话页指标流（可选）：订阅装配层真实 metrics；null 表示无指标来源（显示 -- 占位）。 */
+    val chatMetrics: Flow<ChatMetrics>? get() = null
 }

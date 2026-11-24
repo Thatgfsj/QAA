@@ -204,9 +204,10 @@ object ShellCommandParser {
             "/compact" -> singleEffect(tokens, context, "/compact", ShellEffect.CompactContext)
             "/steer" -> steer(tokens, line, context)
             "/skills" -> singleEffect(tokens, context, "/skills", ShellEffect.QuerySkills)
+            "/export" -> export(tokens, context)
             else -> error(
                 context,
-                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills；" +
+                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export；" +
                     "输入 /help 查看完整说明。",
             )
         }
@@ -232,6 +233,15 @@ object ShellCommandParser {
         return ShellParseResult(
             stage = context.stage,
             effects = listOf(ShellEffect.ForkNode(tokens.getOrNull(1))),
+        )
+    }
+
+    /** /export [路径]：路径可省略（默认沙盒 exports/session-<会话id>.jsonl）。 */
+    private fun export(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 2) return usage(context, "/export [路径]", "/export 最多接受一个导出路径。")
+        return ShellParseResult(
+            stage = context.stage,
+            effects = listOf(ShellEffect.ExportTrace(tokens.getOrNull(1))),
         )
     }
 

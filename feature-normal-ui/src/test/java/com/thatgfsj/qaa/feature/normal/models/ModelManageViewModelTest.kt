@@ -1,6 +1,7 @@
 package com.thatgfsj.qaa.feature.normal.models
 
 import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -211,6 +213,32 @@ class ModelManageViewModelTest {
     }
 
     @Test
+    fun 载入模型_按钮载入中态随挂起调用复位() = runTest {
+        val vm = ModelManageViewModel()
+        val gate = CompletableDeferred<Unit>()
+        // 内置模型序号为 0：同样能触达加载动作（序号 0 不是「未接线」占位）。
+        val port = object : FakeModelPort(
+            entries = listOf(NormalModelEntry(0, "Supra2.5-Pro-Instruct", "Q4_0", 40L, "内置")),
+        ) {
+            override suspend fun loadModel(ordinal: Int): String {
+                gate.await()
+                return "模型已载入：" + ordinal
+            }
+        }
+        vm.bindPort(port)
+        advanceUntilIdle()
+
+        vm.activate(vm.models.value.single())
+        runCurrent()
+        assertEquals(0, vm.loadingOrdinal.value)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.loadingOrdinal.value)
+        assertEquals("模型已载入：0", vm.notice.value)
+    }
+
+    @Test
     fun 完成提示_含名称路径序号() {
         val text = completionText(NormalDownloadState.Completed("repo", "/data/models/repo.gguf", 2))
         assertTrue(text.contains("repo"))
@@ -225,7 +253,7 @@ class ModelManageViewModelTest {
     }
 
     /** 假端口：记录调用参数，状态由测试显式推送。 */
-    private class FakeModelPort(
+    private open class FakeModelPort(
         var entries: List<NormalModelEntry> = listOf(
             NormalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0", 40L * 1024 * 1024, "内置"),
         ),

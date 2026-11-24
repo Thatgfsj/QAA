@@ -36,12 +36,29 @@ class ChatViewModel(
 
     private var nextId = 0L
 
+    private val _metrics = MutableStateFlow(ChatMetrics())
+    /** 指标条状态（只订阅装配层指标流，未载入模型时为 -- 占位）。 */
+    val metrics: StateFlow<ChatMetrics> = _metrics.asStateFlow()
+
     /** 真实 Agent 端口（:app 注入）；null 时保持模块内 fake 流式回复。 */
     private var agent: NormalAgentPort? = null
+
+    /** 指标流收集任务：端口重绑时先取消，避免双来源争写。 */
+    private var metricsJob: Job? = null
 
     /** 装配层注入真实运行链（null 复位为骨架 fake）。 */
     fun bindAgent(port: NormalAgentPort?) {
         agent = port
+        metricsJob?.cancel()
+        metricsJob = null
+        if (port == null) {
+            _metrics.value = ChatMetrics()
+            return
+        }
+        val source = port.chatMetrics ?: return
+        metricsJob = viewModelScope.launch {
+            source.collect { _metrics.value = it }
+        }
     }
 
     /**

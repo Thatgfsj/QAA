@@ -108,6 +108,9 @@ sealed interface ShellEffect {
     /** /skills：查询技能注册表状态。 */
     data object QuerySkills : ShellEffect
 
+    /** /export [路径]：把当前分支导出为微调轨迹 JSONL。 */
+    data class ExportTrace(val path: String?) : ShellEffect
+
     /** /status 追加运行态明细（模型清单数、会话树规模、待处理输入）。 */
     data object QueryStatusExtra : ShellEffect
 

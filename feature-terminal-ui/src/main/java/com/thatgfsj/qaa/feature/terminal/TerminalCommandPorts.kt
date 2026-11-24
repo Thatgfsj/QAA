@@ -33,6 +33,24 @@ fun interface TerminalModelPullPort {
     fun pull(url: String): Flow<TerminalPullEvent>
 }
 
+/**
+ * 模型载入进度（装配层发布）：终端据此显示「正在载入模型 …」占位行。
+ *
+ * 载入结束回到 [Idle] 时占位行静默移除，失败原因仍由 selectModel 的中文回执回显，
+ * 不在 UI 层计时，也不在正文留下成功痕迹（#81 清屏净化语义）。
+ */
+sealed interface TerminalModelLoadState {
+
+    /** 无进行中的载入。 */
+    data object Idle : TerminalModelLoadState
+
+    /** 载入中；[name] 为模型名（内置模型为文件名）。 */
+    data class Loading(val name: String) : TerminalModelLoadState
+}
+
+/** 载入占位行文案（终端单行，完成即移除）。 */
+fun modelLoadPlaceholderText(name: String): String = "正在载入模型 $name…"
+
 /** Agent 运行状态（决定普通输入是开新轮还是进 Follow-up 队列）。 */
 enum class TerminalAgentState {
 
@@ -59,6 +77,9 @@ interface TerminalAgentPort {
 
     /** 运行状态流（装配层据此决定排队或直接执行）。 */
     val state: StateFlow<TerminalAgentState>
+
+    /** 模型载入进度流：占位行只订阅本流，载入时长由运行链决定。 */
+    val modelLoad: StateFlow<TerminalModelLoadState>
 
     /** 执行一个用户轮次；确认流由 Agent Loop 经确认门自行挂起。 */
     suspend fun runTurn(text: String)
@@ -89,6 +110,9 @@ interface TerminalAgentPort {
 
     /** /skills：技能注册表状态。 */
     suspend fun skills(): String
+
+    /** /export [路径]：当前分支导出为微调轨迹 JSONL，返回中文回执（行数 / 剔除统计）。 */
+    suspend fun exportTrace(path: String?): String
 
     /** /status 附加上半段之外的运行态信息（模型清单数、会话树、队列）。 */
     suspend fun statusExtra(): String
