@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -125,5 +126,36 @@ class ChatViewModelTest {
         assertEquals(listOf("片", "片段"), renders)
         assertEquals("最终答复", vm.messages.value.last().content)
         assertFalse(vm.isGenerating.value)
+    }
+
+    // ---- #91 指标条 ----
+
+    @Test
+    fun 未接线指标_显示占位文案() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+
+        assertEquals("TTFT -- | 速度 -- tok/s | Token --", vm.metrics.value.metricsBarText())
+    }
+
+    @Test
+    fun 端口指标流_映射到指标条且随生成更新() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+        val source = MutableStateFlow(ChatMetrics())
+        val port = object : NormalAgentPort {
+            override suspend fun ask(text: String): String = "答复"
+            override val chatMetrics: Flow<ChatMetrics> = source
+        }
+        vm.bindAgent(port)
+        advanceUntilIdle()
+        assertTrue(vm.metrics.value.isPlaceholder)
+
+        source.value = ChatMetrics(ttftMs = 142, tokensPerSecond = 38.4, tokensUsed = 412, contextTokens = 4096)
+        advanceUntilIdle()
+
+        val bar = vm.metrics.value.metricsBarText()
+        assertEquals(142L, vm.metrics.value.ttftMs)
+        assertTrue(bar.contains("TTFT 142ms"))
+        assertTrue(bar.contains("38.4 tok/s"))
+        assertTrue(bar.contains("Token 412 / 4096"))
     }
 }

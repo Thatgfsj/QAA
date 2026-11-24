@@ -45,6 +45,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val toolConfirmPending by viewModel.toolConfirmPending.collectAsStateWithLifecycle()
+    val metrics by viewModel.metrics.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -75,6 +76,14 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 )
             }
         }
+        // 指标条：一行小字常驻，未载入模型时显示 -- 占位（不打扰主视觉）。
+        Text(
+            text = metrics.metricsBarText(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.Bottom,

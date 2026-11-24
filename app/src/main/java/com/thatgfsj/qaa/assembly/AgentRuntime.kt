@@ -43,6 +43,7 @@ import com.thatgfsj.qaa.core.tools.DrawImageTool
 import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
 import com.thatgfsj.qaa.core.tools.ToolLimits
+import com.thatgfsj.qaa.feature.normal.chat.ChatMetrics
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
 import com.thatgfsj.qaa.feature.normal.models.NormalModelEntry
@@ -69,6 +70,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -404,6 +406,16 @@ class AgentRuntime private constructor(private val appContext: Context) :
     /** Normal 端流式片段：与 Terminal 同源 token；最终文本仍以 [ask] 返回值定稿。 */
     override val assistantTokens: Flow<String> =
         assistantStream.mapNotNull { (it as? AssistantStreamEvent.Delta)?.text }
+
+    /** Normal 会话页指标条：与终端统计栏同源，只做形状映射。 */
+    override val chatMetrics: Flow<ChatMetrics> = metrics.map { snapshot ->
+        ChatMetrics(
+            ttftMs = snapshot.ttftMs,
+            tokensPerSecond = snapshot.tokensPerSecond,
+            tokensUsed = snapshot.tokensUsed,
+            contextTokens = snapshot.contextTokens,
+        )
+    }
 
     // ---- TerminalModelListPort / TerminalModelPullPort ----
 
