@@ -13,6 +13,11 @@ import kotlin.math.ceil
  *
  * 压缩水位（设计文档 6.2 / 6.4）：触发 0.8·promptBudget、目标 0.5·promptBudget，
  * 与 [ContextCompactor] 的 thresholdRatio / targetWatermarkRatio 默认值一致。
+ *
+ * 32k 档的真实成本（供用户决策）：4B 级 GQA 模型 f16 KV cache 约 144 KiB/token，
+ * 32768 token ≈ 4.5 GiB，叠加模型权重与运行时缓冲后对手机内存压力显著；且 bundle 类
+ * 非 CPU 后端（HTP/NPU）的长上下文在真机上有 abort 风险。因此 #106 不做非 CPU 硬 clamp，
+ * 只在 >8192 档位改为「只保存不自动重载」，并由回执 / help / 设置页提示 abort 风险。
  */
 object ContextWindow {
 

@@ -38,6 +38,10 @@ internal enum class ContextLengthChange {
  *   有 abort 风险，交用户显式重新载入模型）；
  * - 引擎未加载 / 没有可重载模型：只保存，下次载入模型时生效。
  *
+ * 内存代价（#106）：4B 级 GQA f16 KV cache 约 144 KiB/token，32768 token ≈ 4.5 GiB；
+ * 长上下文在 HTP/NPU 上有 abort 风险，故 > [SAFE_AUTO_RELOAD_MAX] 只保存设置、由用户
+ * 显式重新载入模型。
+ *
  * 与 [BackendSwitcher] 同构：只操作 LLM 引擎本身，不经过 ModelMemoryCoordinator。
  */
 internal class ContextLengthSwitcher(

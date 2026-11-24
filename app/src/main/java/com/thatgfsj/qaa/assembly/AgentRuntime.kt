@@ -652,6 +652,8 @@ class AgentRuntime private constructor(
             // 避免把注定超窗的 prompt 交给引擎（真机 3951/4096 事故的直接防线）。
             if (!preflightAdmits(text)) {
                 emitNotice(PREFLIGHT_INSUFFICIENT_TEXT)
+                // 已知仍越界：finally 里的 safePointCompact 会再尝试一次压缩，属预期内兜底
+                // （#106 决策：不为此消除轮末安全点压缩，保持收尾语义一致）。
                 return@withLock
             }
             driver.drive(loop, text, onToken = tokenRelay::emit)
