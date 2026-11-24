@@ -17,6 +17,37 @@ class ContextCompactorTest {
     private fun newEngine(replies: List<String> = listOf(RecordingSummaryEngine.DEFAULT_SUMMARY)) =
         RecordingSummaryEngine(replies)
 
+    /** 预算 1000 下的目标水位 token 数（0.5 × 预算）。 */
+    private val TARGET_TOKENS = 500
+
+    /** 占用高于目标水位（500）但低于压缩阈值（800）：手动入口的“有收益”区间。 */
+    private fun storeAboveTargetBelowThreshold(): TreeSessionStore {
+        val store = TreeSessionStore("manual-compact")
+        store.appendTurn(
+            userText = "$T1_USER ${fillerTokens(200)}",
+            assistantText = "$T1_ASSISTANT ${fillerTokens(200)}",
+        )
+        store.appendTurn("$T2_USER 继续整理。", "$T2_ASSISTANT 已整理完毕。")
+        store.appendTurn(
+            userText = "$T3_USER 再补一段结论。",
+            assistantText = "$T3_ASSISTANT 结论如下。",
+            toolOutput = "$T3_TOOL 最新工具输出",
+        )
+        return store
+    }
+
+    /** 沿 parentId 回溯摘要范围（含两端），用于校验旧摘要是否被新范围吸收。 */
+    private fun coveredIds(store: TreeSessionStore, compaction: SummaryCompaction): List<String> {
+        val ids = mutableListOf<String>()
+        var cursor: String? = compaction.coveredTo
+        while (cursor != null) {
+            ids += cursor
+            if (cursor == compaction.coveredFrom) break
+            cursor = store.node(cursor)?.parentId
+        }
+        return ids
+    }
+
     private fun storeWithThreeTurns(): TreeSessionStore {
         val store = TreeSessionStore("compaction")
         store.appendTurn(
@@ -100,10 +131,12 @@ class ContextCompactorTest {
     @Test
     fun C3_保护窗口保留当前轮上轮与最新工具输出() = runTest {
         val store = TreeSessionStore("window")
+        // 第一轮放入足量内容，确保摘要开销低于被覆盖内容（否则会被收益保护跳过）。
+        val filler = fillerTokens(100)
         val first = store.appendTurn(
-            "$T1_USER 第一轮",
-            "$T1_ASSISTANT 第一轮回答",
-            toolOutput = "$T1_TOOL 第一轮工具输出",
+            "$T1_USER 第一轮 $filler",
+            "$T1_ASSISTANT 第一轮回答 $filler",
+            toolOutput = "$T1_TOOL 第一轮工具输出 $filler",
         )
         val second = store.appendTurn(
             "$T2_USER 第二轮",
@@ -130,7 +163,7 @@ class ContextCompactorTest {
     }
 
     @Test
-    fun C3_既有摘要节点保留且不进入后续压缩范围() = runTest {
+    fun C3_多轮压缩把既有摘要并入新范围_替换而非叠加() = runTest {
         val store = TreeSessionStore("existing-summary")
         store.appendTurn("$T1_USER 第一轮", "$T1_ASSISTANT 第一轮回答")
         store.appendTurn("$T2_USER 第二轮", "$T2_ASSISTANT 第二轮回答")
@@ -145,13 +178,15 @@ class ContextCompactorTest {
         val second = compactor.compact(store, budget, usedTokens = 900) as CompactionResult.Compacted
 
         assertEquals(2, engine.invokeCount)
+        // 旧摘要被第二次范围吸收后从视图消失：视图始终只留一个摘要段，避免叠加膨胀（#100）。
         val view = compactor.view(store)
-        assertEquals(listOf("摘要一：$SUMMARY_ONE", "摘要二：$SUMMARY_TWO"), view.summaries)
+        assertEquals(listOf("摘要二：$SUMMARY_TWO"), view.summaries)
 
         val secondCompaction = store.node(second.summaryNodeId)!!.compaction!!
-        val secondRangeIds = store.branchTo(secondCompaction.coveredTo).map { it.id }
+        val secondRangeIds = coveredIds(store, secondCompaction)
         assertTrue(secondRangeIds.contains(secondCompaction.coveredFrom))
-        assertFalse(secondRangeIds.contains(firstSummaryId))
+        assertTrue(secondRangeIds.contains(firstSummaryId))
+        assertEquals(1, second.replacedSummaryCount)
 
         // 第二次摘要输入衔接既有摘要，但不重复展开第一轮原文。
         assertTrue(engine.calls[1].any { it.content.contains("摘要一：$SUMMARY_ONE") })
@@ -179,9 +214,11 @@ class ContextCompactorTest {
         store.appendTurn("$T8_USER 第八轮", "$T8_ASSISTANT 第八轮回答")
 
         val second = compactor.compact(store, budget, usedTokens = 900) as CompactionResult.Compacted
-        assertEquals(2, second.ranges.size)
+        // 既有摘要不再是分段边界：一次扫描就把整段未保护历史连同旧摘要压成一段。
+        assertEquals(1, second.ranges.size)
         assertTrue(second.watermarkSatisfied)
-        assertEquals(3, compactor.view(store).summaries.size)
+        assertTrue(second.estimatedTokensAfter < second.estimatedTokensBefore)
+        assertEquals(1, compactor.view(store).summaries.size)
     }
 
     @Test
@@ -242,10 +279,12 @@ class ContextCompactorTest {
 
     @Test
     fun C6_手动触发_低于阈值也执行() = runTest {
-        val store = storeWithThreeTurns()
+        val store = storeAboveTargetBelowThreshold()
         val engine = newEngine()
         val compactor = ContextCompactor(engine)
-        assertFalse(compactor.shouldCompact(compactor.estimateContextTokens(store), budget))
+        val before = compactor.estimateContextTokens(store)
+        assertFalse(compactor.shouldCompact(before, budget))
+        assertTrue(before > TARGET_TOKENS)
 
         val result = compactor.compactManually(store, budget) as CompactionResult.Compacted
         assertEquals(CompactionTrigger.MANUAL, result.trigger)
@@ -253,8 +292,66 @@ class ContextCompactorTest {
     }
 
     @Test
-    fun C6_运行中手动压缩延后且不改树() = runTest {
+    fun C6_占用不高于目标水位时手动压缩不改树() = runTest {
         val store = storeWithThreeTurns()
+        val engine = newEngine()
+        val compactor = ContextCompactor(engine)
+        val nodeCount = store.nodeCount()
+        val before = compactor.estimateContextTokens(store)
+        assertTrue(before <= TARGET_TOKENS)
+
+        val result = compactor.compactManually(store, budget) as CompactionResult.Skipped
+        assertEquals(SkipReason.ALREADY_BELOW_TARGET, result.reason)
+        assertEquals(before, result.currentTokens)
+        assertEquals(TARGET_TOKENS, result.targetTokens)
+        assertEquals(0, engine.invokeCount)
+        assertEquals(nodeCount, store.nodeCount())
+    }
+
+    @Test
+    fun C6_摘要开销不低于被覆盖内容时跳过且不改树() = runTest {
+        val store = TreeSessionStore("no-gain")
+        store.appendTurn("hi", "ok")
+        store.appendTurn("$T2_USER ${fillerTokens(300)}", "$T2_ASSISTANT ${fillerTokens(300)}")
+        store.appendTurn("$T3_USER ${fillerTokens(300)}", "$T3_ASSISTANT ${fillerTokens(300)}")
+        val engine = newEngine()
+        val compactor = ContextCompactor(engine)
+        val nodeCount = store.nodeCount()
+
+        val result = compactor.compactManually(store, budget) as CompactionResult.Skipped
+        assertEquals(SkipReason.NOT_WORTHWHILE, result.reason)
+        // 摘要已生成一次，但估算无收益故不写树。
+        assertEquals(1, engine.invokeCount)
+        assertEquals(nodeCount, store.nodeCount())
+    }
+
+    @Test
+    fun C7_回执字段与压后token不增长() = runTest {
+        val store = storeAboveTargetBelowThreshold()
+        val compactor = ContextCompactor(newEngine())
+        val before = compactor.estimateContextTokens(store)
+
+        val result = compactor.compactManually(store, budget) as CompactionResult.Compacted
+        assertEquals(before, result.estimatedTokensBefore)
+        assertTrue(result.estimatedTokensAfter < result.estimatedTokensBefore)
+        assertEquals(
+            result.estimatedTokensBefore - result.estimatedTokensAfter,
+            result.savedTokens,
+        )
+        assertTrue(result.retainedNodeCount > 0)
+        assertTrue(result.summaryChars > 0)
+
+        // 连续压缩：占用水位已低于目标，第二次直接跳过且不再追加摘要节点。
+        val nodeCount = store.nodeCount()
+        val second = compactor.compactManually(store, budget) as CompactionResult.Skipped
+        assertEquals(SkipReason.ALREADY_BELOW_TARGET, second.reason)
+        assertEquals(nodeCount, store.nodeCount())
+        assertEquals(1, compactor.view(store).summaries.size)
+    }
+
+    @Test
+    fun C6_运行中手动压缩延后且不改树() = runTest {
+        val store = storeAboveTargetBelowThreshold()
         val compactor = ContextCompactor(newEngine())
         store.markTurnActive(true)
         val nodeCount = store.nodeCount()
@@ -291,7 +388,8 @@ class ContextCompactorTest {
         val engine = newEngine()
         val result = ContextCompactor(engine).compact(store, budget, usedTokens = 900)
 
-        assertEquals(CompactionResult.Skipped(SkipReason.NOTHING_TO_COMPACT), result)
+        val skipped = result as CompactionResult.Skipped
+        assertEquals(SkipReason.NOTHING_TO_COMPACT, skipped.reason)
         assertEquals(0, engine.invokeCount)
     }
 
@@ -359,10 +457,10 @@ class ContextCompactorTest {
 
     @Test
     fun 摘要正文受长度上限约束() = runTest {
-        val store = storeWithThreeTurns()
+        val store = storeAboveTargetBelowThreshold()
         val longSummary = "摘要".repeat(400)
         val compactor = ContextCompactor(newEngine(listOf(longSummary)), maxSummaryChars = 120)
-        val compacted = compactor.compact(store, budget, usedTokens = 900) as CompactionResult.Compacted
+        val compacted = compactor.compactManually(store, budget) as CompactionResult.Compacted
 
         val content = store.node(compacted.summaryNodeId)!!.content
         assertTrue(content.length <= 130)

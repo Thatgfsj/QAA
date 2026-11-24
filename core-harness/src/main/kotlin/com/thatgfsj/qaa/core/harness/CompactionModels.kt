@@ -23,13 +23,32 @@ sealed interface CompactionResult {
         val estimatedTokensAfter: Int,
         val postWatermarkRatio: Float,
         val watermarkSatisfied: Boolean,
+        /** 压缩后保留的历史节点条数（不含摘要段）。 */
+        val retainedNodeCount: Int = 0,
+        /** 本次新写摘要的字符总数。 */
+        val summaryChars: Int = 0,
+        /** 本次新摘要吸收的既有摘要节点数（替换而非叠加）。 */
+        val replacedSummaryCount: Int = 0,
     ) : CompactionResult {
         /** 本次压缩追加的最后一个 summary 节点 id。 */
         val summaryNodeId: String get() = ranges.last().summaryNodeId
+
+        /** 本次压缩省下的 token 数（before/after 同口径估算，恒为非负）。 */
+        val savedTokens: Int get() = (estimatedTokensBefore - estimatedTokensAfter).coerceAtLeast(0)
     }
 
-    /** 未触发或无需压缩。 */
-    data class Skipped(val reason: SkipReason) : CompactionResult
+    /**
+     * 未触发、无需压缩或压缩无收益。
+     *
+     * [currentTokens]/[contextBudget]/[targetTokens] 用于回执说明“当前多少、目标多少”，
+     * 未知时为 0（不改变既有等值语义）。
+     */
+    data class Skipped(
+        val reason: SkipReason,
+        val currentTokens: Int = 0,
+        val contextBudget: Int = 0,
+        val targetTokens: Int = 0,
+    ) : CompactionResult
 
     /** 运行中收到 /compact：装配层应在最近安全点重试，树未改动。 */
     data object DeferredUntilSafePoint : CompactionResult
@@ -45,6 +64,12 @@ enum class SkipReason {
 
     /** 保护窗口之外没有可压缩节点（会话过短或已全部压缩）。 */
     NOTHING_TO_COMPACT,
+
+    /** 手动压缩时占用已不高于目标水位：再压一次只会增加摘要开销，故不改树。 */
+    ALREADY_BELOW_TARGET,
+
+    /** 有可压缩节点，但摘要开销不低于被覆盖内容：压缩无收益，不改树。 */
+    NOT_WORTHWHILE,
 }
 
 /**
