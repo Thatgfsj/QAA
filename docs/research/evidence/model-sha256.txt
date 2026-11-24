@@ -1,0 +1,20 @@
+# QAA #97 量化取证 —— 模型文件校验（sha256）
+# 采集时间：2026-11-25 05:2x（主机，取证包生成时）
+# 命令：sha256sum -b <file>
+# 说明：真机导入的 GGUF 与以下主机文件同源；repo 内置资产取自 git 仓库。
+
+# --- 仓库内置资产（app/src/main/assets/models/）---
+f7091088c4f016fe8c76c664ae272817c265788870f84b57f3189cc1ca90e7d5 *Supra2.5-Pro-Instruct-Q4_0.gguf   # 43,565,760 B, 内置冒烟模型
+
+# --- 主机模型库（~/llama.cpp/models/，真机导入源）---
+ccd3e7d5e057f7974b0d56ff3b8df0abef7dda3dbb93556a32feb885b6cecb19 *Qwen3.5-4B-QUASAR-Q4_0.gguf                    # 2,703,509,760 B  mtime 2026-11-25 03:11
+f4cec54f9fc99bb18c1fc7d0f5f3dfc802d22d0cd9853b3908d80a8d82317ec7 *Spark-X2.6-4B-Q4_0.gguf                        # 2,405,583,200 B  mtime 2026-11-25 03:10
+91cb2811aebb47ac916aa619d27d4cdd7f4143106b7917accb8ead4cd7f5cbd9 *Spark-X2.6-4B-Q4_K_M.gguf                      # 3,543,441,312 B  mtime 2026-10-28 01:14
+8d96279c95ae2be111576f3f599880598be0922efee15069b4d7e4dd96ef6ed4 *Spark-X2.6-1.7B-Q8_0.gguf                      # 1,820,113,440 B  mtime 2026-10-30 02:37
+423f10b6ec2d99c3378143d7cd3b80eb4887b3ed92103103ac59173b404f4f7c *Huihui-Qwen3.5-4B-abliterated.Q4_K_M.gguf       # 2,707,514,688 B  mtime 2026-09-29 00:34
+ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd *MiniCPM5-2B-Q4_K_M.gguf                         # 1,561,318,368 B  mtime 2026-10-15 01:52
+
+# --- 未上机 / 仅主机存在（供后续对照，未纳入 #97 观测）---
+# MiniCPM5-2B-Math-Q8_0.gguf   2,679,711,264 B  file_type=7  arch=llama  pre=minicpm5
+# Spark-X2.5-4B-Q4_K_M.gguf    2,600,224,640 B  （未解析头，K 系，预测乱码）
+# Supra2.5-Pro-Instruct-Q4_K_M.gguf  53,856,960 B  （下载截断的残缺文件，file_type=15，张量 134 但权重块为 Q5_0/Q8_0/F32）
