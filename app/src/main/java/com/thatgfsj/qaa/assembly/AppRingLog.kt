@@ -185,6 +185,18 @@ object AppLog {
         AppRingLog.global.info(TAG_MODEL, "已卸载模型 $name")
     }
 
+    /** 模型删除（#111）：成功记释放空间与剩余条数，失败记原因。 */
+    fun modelDeleted(name: String, freedBytes: Long, remaining: Int) {
+        AppRingLog.global.info(
+            TAG_MODEL,
+            "已删除模型 $name（释放 $freedBytes 字节，剩余清单 $remaining 项）",
+        )
+    }
+
+    fun modelDeleteFailed(name: String, reason: String) {
+        AppRingLog.global.error(TAG_MODEL, "模型删除失败：$name${suffix(reason)}")
+    }
+
     /** 后端锁定 / 降级链结果：[fallback] 为 true 表示命中了回滚或降级。 */
     fun backend(request: String, result: String, fallback: Boolean = false) {
         val message = "请求后端 $request；结果：$result"

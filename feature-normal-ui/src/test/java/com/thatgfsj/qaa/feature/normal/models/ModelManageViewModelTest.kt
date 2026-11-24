@@ -252,6 +252,75 @@ class ModelManageViewModelTest {
         assertEquals("已下载 1.0 KB / 2.0 KB（50%）", progressText(1024, 2048, null))
     }
 
+    // ---- 删除（#111）：内置保护、二次确认、端口调用与刷新 ----
+
+    @Test
+    fun 请求删除内置模型_直接拒绝且不出确认框() = runTest {
+        val vm = ModelManageViewModel()
+        val port = FakeModelPort()
+        vm.bindPort(port)
+        advanceUntilIdle()
+
+        vm.requestDelete(vm.models.value.single().copy(ordinal = 0))
+
+        assertEquals("内置冒烟模型不可删除：0 号模型用于冒烟与降级，请保留。", vm.notice.value)
+        assertNull(vm.pendingDelete.value)
+        assertTrue(port.deletedOrdinals.isEmpty())
+    }
+
+    @Test
+    fun 请求删除_进入二次确认_取消不调用端口() = runTest {
+        val vm = ModelManageViewModel()
+        val port = FakeModelPort()
+        vm.bindPort(port)
+        advanceUntilIdle()
+        val model = vm.models.value.single().copy(ordinal = 2)
+
+        vm.requestDelete(model)
+        assertEquals(model, vm.pendingDelete.value)
+        assertTrue(port.deletedOrdinals.isEmpty())
+
+        vm.cancelDelete()
+        advanceUntilIdle()
+        assertNull(vm.pendingDelete.value)
+        assertTrue(port.deletedOrdinals.isEmpty())
+    }
+
+    @Test
+    fun 确认删除_调用端口回显结果并刷新清单() = runTest {
+        val vm = ModelManageViewModel()
+        val port = FakeModelPort()
+        vm.bindPort(port)
+        advanceUntilIdle()
+        vm.requestDelete(vm.models.value.single().copy(ordinal = 2))
+
+        val readsBefore = port.entryCalls
+        vm.confirmDelete()
+        advanceUntilIdle()
+
+        assertEquals(listOf(2), port.deletedOrdinals)
+        assertNull(vm.pendingDelete.value)
+        assertNull(vm.deletingOrdinal.value)
+        assertEquals(port.deleteText, vm.notice.value)
+        assertTrue(port.entryCalls > readsBefore)
+    }
+
+    @Test
+    fun 确认删除_端口异常转为中文失败提示() = runTest {
+        val vm = ModelManageViewModel()
+        val port = FakeModelPort()
+        port.deleteError = "SDK 删除失败（code=3）"
+        vm.bindPort(port)
+        advanceUntilIdle()
+        vm.requestDelete(vm.models.value.single().copy(ordinal = 2))
+
+        vm.confirmDelete()
+        advanceUntilIdle()
+
+        assertEquals("删除失败：SDK 删除失败（code=3）", vm.notice.value)
+        assertNull(vm.deletingOrdinal.value)
+    }
+
     /** 假端口：记录调用参数，状态由测试显式推送。 */
     private open class FakeModelPort(
         var entries: List<NormalModelEntry> = listOf(
@@ -271,7 +340,12 @@ class ModelManageViewModelTest {
         override val downloadState: StateFlow<NormalDownloadState> get() = state
         override val resumeTask: StateFlow<NormalResumeTask?> get() = resume
 
-        override suspend fun modelEntries(): List<NormalModelEntry> = entries
+        var entryCalls = 0
+
+        override suspend fun modelEntries(): List<NormalModelEntry> {
+            entryCalls += 1
+            return entries
+        }
 
         override suspend fun loadModel(ordinal: Int): String = "模型已载入：" + ordinal
 
@@ -295,6 +369,16 @@ class ModelManageViewModelTest {
 
         override suspend fun recoverDownload() {
             recoverCalls++
+        }
+
+        /** 删除回执（#111）与调用记录。 */
+        var deleteText = "已删除模型：Qwen2.5-1.5B（释放约 100.0 MB），剩余清单 1 项。"
+        var deleteError: String? = null
+        val deletedOrdinals = mutableListOf<Int>()
+
+        override suspend fun deleteModel(ordinal: Int): String {
+            deleteError?.let { error(it) }
+            return deleteText.also { deletedOrdinals += ordinal }
         }
     }
 }

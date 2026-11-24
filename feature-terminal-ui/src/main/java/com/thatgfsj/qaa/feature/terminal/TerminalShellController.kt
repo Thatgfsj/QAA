@@ -107,6 +107,7 @@ class TerminalShellController(
             is ShellEffect.PullModel -> pullModel(effect.url)
             // #99：/tree 一律经 sessionTreeOutput 兜底，空树给空态提示、非空补图例。
             ShellEffect.QueryTree -> query { sessionTreeOutput(it.tree()) }
+            is ShellEffect.DeleteModel -> deleteModel(effect)
             is ShellEffect.ForkNode -> query { required(it.fork(effect.nodeId)) }
             ShellEffect.CompactContext -> query { required(it.compact()) }
             ShellEffect.QuerySkills -> query { required(it.skills()) }
@@ -225,6 +226,29 @@ class TerminalShellController(
             } catch (error: Exception) {
                 viewModel.appendOutput("模型下载中断：${error.message ?: error::class.simpleName}")
             }
+        }
+    }
+
+    /**
+     * model delete：交给运行链删除（内置 / 加载中 / 轮次中的拒绝由端口回中文原因），
+     * 回执整段回显后刷新模型清单，使后续 `chat <序号>` 立即按新序号解析。
+     */
+    private fun deleteModel(effect: ShellEffect.DeleteModel) {
+        val port = agent
+        if (port == null) {
+            viewModel.appendOutput(UNWIRED_NOTICE)
+            return
+        }
+        scope.launch {
+            val text = try {
+                port.deleteModel(effect.ordinal, effect.name)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                "删除失败：${error.message ?: error::class.simpleName}"
+            }
+            viewModel.appendOutput(required(text))
+            refreshModels()
         }
     }
 

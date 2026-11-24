@@ -17,6 +17,17 @@ interface GenieXModelGateway {
     suspend fun list(): List<String>
 
     fun pull(input: ModelPullInput): Flow<ModelManagerWrapper.PullEvent>
+
+    /**
+     * 删除 SDK 托管模型，返回 SDK 状态码（0 成功；[REMOVE_UNSUPPORTED] 表示网关未实现）。
+     * 删除只清理 SDK 缓存，清单与落盘文件由 [ModelDeleter] 同步（#111）。
+     */
+    suspend fun remove(modelName: String): Int = REMOVE_UNSUPPORTED
+
+    companion object {
+        /** 网关未实现删除（JVM 单测替身默认值）。 */
+        const val REMOVE_UNSUPPORTED = -1
+    }
 }
 
 /** 生产实现：直接转发到 GenieX ModelManagerWrapper（需先完成 SDK init）。 */
@@ -26,6 +37,8 @@ object DefaultGenieXModelGateway : GenieXModelGateway {
         ModelManagerWrapper.getPaths(modelName)
 
     override suspend fun list(): List<String> = ModelManagerWrapper.list()
+
+    override suspend fun remove(modelName: String): Int = ModelManagerWrapper.remove(modelName)
 
     override fun pull(input: ModelPullInput): Flow<ModelManagerWrapper.PullEvent> =
         ModelManagerWrapper.pullFlow(input)

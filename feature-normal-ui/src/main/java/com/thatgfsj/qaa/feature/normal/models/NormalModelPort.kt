@@ -77,4 +77,10 @@ interface NormalModelPort {
 
     /** 恢复检测（幂等）：把上次进程遗留的任务暴露到 [resumeTask]。 */
     suspend fun recoverDownload()
+
+    /**
+     * 删除模型（#111）：SDK 缓存 + 落盘文件 + 清单登记三处同步，返回可直接展示的中文结果。
+     * 内置 0 号与当前已加载模型由装配层拒绝并在结果里说明原因。
+     */
+    suspend fun deleteModel(ordinal: Int): String
 }

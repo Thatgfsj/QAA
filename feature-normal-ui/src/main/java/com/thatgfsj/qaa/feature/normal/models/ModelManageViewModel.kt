@@ -43,6 +43,14 @@ class ModelManageViewModel : ViewModel() {
     private val _loadingOrdinal = MutableStateFlow<Int?>(null)
     val loadingOrdinal: StateFlow<Int?> = _loadingOrdinal.asStateFlow()
 
+    /** 待二次确认删除的模型（null 表示无确认框）。 */
+    private val _pendingDelete = MutableStateFlow<ModelInfo?>(null)
+    val pendingDelete: StateFlow<ModelInfo?> = _pendingDelete.asStateFlow()
+
+    /** 正在删除的模型序号（null 表示空闲）：删除按钮据此显示删除中态。 */
+    private val _deletingOrdinal = MutableStateFlow<Int?>(null)
+    val deletingOrdinal: StateFlow<Int?> = _deletingOrdinal.asStateFlow()
+
     private var port: NormalModelPort? = null
     private var collector: Job? = null
 
@@ -58,6 +66,8 @@ class ModelManageViewModel : ViewModel() {
         _urlError.value = null
         _notice.value = null
         _loadingOrdinal.value = null
+        _pendingDelete.value = null
+        _deletingOrdinal.value = null
         if (newPort == null) {
             _models.value = defaultCatalog()
             return
@@ -147,6 +157,43 @@ class ModelManageViewModel : ViewModel() {
                 refreshModels(port)
             } finally {
                 _loadingOrdinal.value = null
+            }
+        }
+    }
+
+    /** 请求删除：内置 0 号直接拒绝，其余进入二次确认（不直接删）。 */
+    fun requestDelete(model: ModelInfo) {
+        if (port == null) {
+            _notice.value = "删除入口未接线：请确认 Normal 窗口由正式装配启动。"
+            return
+        }
+        if (model.ordinal == 0) {
+            _notice.value = "内置冒烟模型不可删除：0 号模型用于冒烟与降级，请保留。"
+            return
+        }
+        if (_deletingOrdinal.value != null) return
+        _pendingDelete.value = model
+    }
+
+    /** 取消删除确认（不发起删除）。 */
+    fun cancelDelete() {
+        _pendingDelete.value = null
+    }
+
+    /** 确认删除：转端口执行并回显中文结果，成功后刷新清单（#111）。 */
+    fun confirmDelete() {
+        val model = _pendingDelete.value ?: return
+        _pendingDelete.value = null
+        val port = this.port ?: return
+        if (_deletingOrdinal.value != null) return
+        _deletingOrdinal.value = model.ordinal
+        viewModelScope.launch {
+            try {
+                _notice.value = runCatching { port.deleteModel(model.ordinal) }
+                    .getOrElse { "删除失败：" + (it.message ?: it::class.simpleName) }
+                refreshModels(port)
+            } finally {
+                _deletingOrdinal.value = null
             }
         }
     }

@@ -131,4 +131,10 @@ interface TerminalAgentPort {
 
     /** /system <文本|reset>：整体替换系统提示词；null 表示恢复默认，返回中文回执（#105）。 */
     suspend fun setSystemPrompt(text: String?): String
+
+    /**
+     * model delete（#111）：删除指定序号的模型（SDK 缓存 + 落盘文件 + 清单登记），
+     * 返回可直接回显的中文结果。内置 0 号与当前已加载模型由实现拒绝。
+     */
+    suspend fun deleteModel(ordinal: Int, name: String): String
 }

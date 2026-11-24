@@ -13,6 +13,9 @@ object ShellCommandParser {
 
     private val WHITESPACE = Regex("\\s+")
 
+    /** `model delete` 二次确认开关。 */
+    private const val FORCE_FLAG = "--force"
+
     /** 解析一行输入；空行返回无输出、无副作用的结果，阶段保持不变。 */
     fun parse(input: String, context: ShellContext = ShellContext()): ShellParseResult {
         val line = input.trim()
@@ -77,11 +80,62 @@ object ShellCommandParser {
                     effects = listOf(ShellEffect.ImportModel),
                 )
             }
+            "delete" -> parseDelete(tokens, context)
             else -> error(
                 context,
-                "未知 model 子命令：${tokens[1]}。可用：model、model pull <url>、model import。",
+                "未知 model 子命令：${tokens[1]}。可用：model、model pull <url>、model import、" +
+                    "model delete <序号|名称> --force。",
             )
         }
+    }
+
+    /**
+     * `model delete <序号|名称> [--force]`（#111）。
+     *
+     * 无 `--force` 只回显将删除的对象（名称 / 量化 / 体积 / 路径）与影响，要求带 `--force`
+     * 再次执行；内置 0 号在这里直接拒绝，当前已加载模型由运行链在执行时拒绝。
+     */
+    private fun parseDelete(tokens: List<String>, context: ShellContext): ShellParseResult {
+        val args = tokens.drop(2)
+        val force = args.any { it == FORCE_FLAG }
+        val unknownOption = args.firstOrNull { it.startsWith("-") && it != FORCE_FLAG }
+        if (unknownOption != null) {
+            return error(context, "未知选项：${unknownOption}。model delete 只支持 --force。")
+        }
+        val targetTokens = args.filterNot { it == FORCE_FLAG }
+        if (targetTokens.isEmpty()) {
+            return usage(
+                context,
+                "model delete <序号|名称> [--force]",
+                "需要指定要删除的模型（序号或名称）；先不带 --force 执行可查看删除影响。",
+            )
+        }
+        if (targetTokens.size > 1) {
+            return usage(context, "model delete <序号|名称> [--force]", "model delete 只接受一个模型参数。")
+        }
+        val entry = resolveModel(targetTokens.single(), context)
+            ?: return error(
+                context,
+                "未找到本地模型：${targetTokens.single()}。输入 model 查看本地模型清单（名称或序号）。",
+            )
+        if (entry.index == 0) {
+            return error(context, "内置冒烟模型不可删除：${entry.displayText}。请保留 0 号模型用于冒烟与降级。")
+        }
+        if (!force) {
+            return reply(
+                context,
+                "将删除模型：${entry.index}. ${entry.displayText}",
+                "体积：${modelSizeText(entry.sizeBytes)} · 路径：${entry.path ?: "（仅清单登记，未落盘）"}",
+                "影响：SDK 缓存与模型文件将被删除、本地清单同步移除，操作不可撤销；" +
+                    "若正在使用该模型请先切换。",
+                "确认请再次执行：model delete ${entry.index} --force",
+            )
+        }
+        return ShellParseResult(
+            stage = context.stage,
+            output = listOf("正在删除模型：${entry.index}. ${entry.displayText}…"),
+            effects = listOf(ShellEffect.DeleteModel(entry.index, entry.name)),
+        )
     }
 
     private fun enterSession(

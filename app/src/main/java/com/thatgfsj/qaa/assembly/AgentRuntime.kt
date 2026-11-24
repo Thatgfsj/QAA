@@ -38,6 +38,8 @@ import com.thatgfsj.qaa.core.inference.LlmEnginePort
 import com.thatgfsj.qaa.core.inference.LlmLoadConfig
 import com.thatgfsj.qaa.core.inference.MemoryProbe
 import com.thatgfsj.qaa.core.inference.ModelCatalog
+import com.thatgfsj.qaa.core.inference.ModelDeleteResult
+import com.thatgfsj.qaa.core.inference.ModelDeleter
 import com.thatgfsj.qaa.core.inference.ModelMemoryCoordinator
 import com.thatgfsj.qaa.core.inference.ModelPullClient
 import com.thatgfsj.qaa.core.inference.ModelPullEvent
@@ -129,6 +131,9 @@ class AgentRuntime private constructor(
     private val llmGateway = LlmGatewayAdapter(engine) { contextLengthSetting }
     private val releaser = AssetModelReleaser(AndroidAssetSource(appContext), modelsDir)
     private val catalog = ModelCatalog(modelsDir, DefaultGenieXModelGateway)
+
+    /** 模型删除链路（#111）：终端 model delete 与 Normal 模型页共用同一实现。 */
+    private val deleter = ModelDeleter(modelsDir, catalog, DefaultGenieXModelGateway)
     private val pullClient = ModelPullClient()
     private val sandbox = LocalSandboxFs(listOf(SandboxRoot.File(SANDBOX_ROOT_ID, filesDir.toPath())))
     private val storageGrant = StorageGrant(appContext, sandbox)
@@ -689,6 +694,61 @@ class AgentRuntime private constructor(
     override fun discardDownload() = downloads.discard()
 
     override suspend fun recoverDownload() = downloads.recover()
+
+    // ---- 模型删除（#111）：终端与 Normal 共用受保护策略与三处同步 ----
+
+    /** 终端 `model delete <序号|名称> --force`：名称用于序号失效时兜底解析。 */
+    override suspend fun deleteModel(ordinal: Int, name: String): String =
+        deleteModelShared(ordinal, name)
+
+    /** Normal 模型页删除：只透传序号（页面按当前清单展示序号）。 */
+    override suspend fun deleteModel(ordinal: Int): String = deleteModelShared(ordinal, null)
+
+    /**
+     * 受保护判断（内置 0 号 / 当前已加载 / 轮次进行中）→ [ModelDeleter] 三处同步
+     * （SDK 缓存 + 落盘文件 + 清单登记）→ 清理下载记录 → 中文回执。
+     *
+     * 删除成功后下载记录一并清理，避免重启恢复出「已删模型的遗留任务」；
+     * 清理失败不影响删除结果（记录只是下载态投影）。
+     */
+    private suspend fun deleteModelShared(ordinal: Int, name: String?): String {
+        ensureSdkReady()
+        val entry = catalog.resolve(ordinal)
+            ?: name?.let { catalog.resolveByName(it) }
+            ?: return "未找到本地模型：${name ?: ordinal}。输入 model 查看清单。"
+        if (entry.ordinal == 0 || entry.source == ModelSource.BUILT_IN) {
+            return ModelDeleter.BUILT_IN_REFUSED
+        }
+        if (turnMutex.isLocked) {
+            return "轮次进行中：暂不能删除模型，请等本轮结束后重试。"
+        }
+        if (engine.isLoaded.value && loadedModelSource != null && entry.path == loadedModelSource) {
+            return "当前模型已加载：请先切换模型（chat <序号>）或卸载后再删除。"
+        }
+        val result = deleter.delete(entry.ordinal)
+        return when (result) {
+            is ModelDeleteResult.Deleted -> {
+                runCatching { downloadTracker.discardByTarget(entry.name) }
+                AppLog.modelDeleted(entry.name, result.freedBytes, result.remaining)
+                "已删除模型：${entry.name}（释放约 ${formatFreedBytes(result.freedBytes)}），" +
+                    "剩余清单 ${result.remaining} 项。"
+            }
+            is ModelDeleteResult.Refused -> result.reason
+            is ModelDeleteResult.NotFound -> "未找到本地模型：${result.token}。"
+            is ModelDeleteResult.Failed -> {
+                AppLog.modelDeleteFailed(entry.name, result.reason)
+                result.reason
+            }
+        }
+    }
+
+    private fun formatFreedBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 ->
+            "%.1f GB".format(java.util.Locale.ROOT, bytes / 1024.0 / 1024.0 / 1024.0)
+        bytes >= 1024L * 1024 -> "%.1f MB".format(java.util.Locale.ROOT, bytes / 1024.0 / 1024.0)
+        bytes >= 1024L -> "%.1f KB".format(java.util.Locale.ROOT, bytes / 1024.0)
+        else -> "$bytes B"
+    }
 
     // ---- 系统选择器接线 ----
 

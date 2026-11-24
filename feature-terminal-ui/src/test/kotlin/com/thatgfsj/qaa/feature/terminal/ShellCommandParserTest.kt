@@ -99,6 +99,71 @@ class ShellCommandParserTest {
         )
     }
 
+    // ---- model delete（#111）----
+
+    private val deletableModel = LocalModelEntry(
+        index = 1,
+        name = "Qwen2.5-1.5B",
+        quantization = "Q4_K_M",
+        sizeBytes = 900L * 1024 * 1024,
+        path = "/data/models/Qwen2.5-1.5B-Q4_K_M.gguf",
+    )
+    private val withDeletableModel = shell.copy(models = LocalModelCatalog.entries + deletableModel)
+
+    @Test
+    fun modelDeleteWithoutArgumentsShowsUsage() {
+        val text = parse("model delete", withDeletableModel).text()
+        assertTrue(text.contains("用法：model delete <序号|名称> [--force]"))
+        assertTrue(text.contains("先不带 --force 执行可查看删除影响"))
+    }
+
+    @Test
+    fun modelDeleteWithoutForceEchoesImpactAndRequiresForce() {
+        val result = parse("model delete 1", withDeletableModel)
+        assertTrue(result.effects.isEmpty())
+        val text = result.text()
+        assertTrue(text.contains("将删除模型：1. Qwen2.5-1.5B(Q4_K_M)"))
+        assertTrue(text.contains("体积：900.0 MB"))
+        assertTrue(text.contains("/data/models/Qwen2.5-1.5B-Q4_K_M.gguf"))
+        assertTrue(text.contains("操作不可撤销"))
+        assertTrue(text.contains("确认请再次执行：model delete 1 --force"))
+    }
+
+    @Test
+    fun modelDeleteWithForceEmitsDeleteEffect() {
+        val result = parse("model delete 1 --force", withDeletableModel)
+        assertEquals(listOf(ShellEffect.DeleteModel(1, "Qwen2.5-1.5B")), result.effects)
+        assertTrue(result.text().contains("正在删除模型：1. Qwen2.5-1.5B(Q4_K_M)"))
+    }
+
+    @Test
+    fun modelDeleteAcceptsNameAndForceBeforeTarget() {
+        assertTrue(parse("model delete qwen2.5-1.5b", withDeletableModel).text().contains("将删除模型：1."))
+        assertEquals(
+            listOf(ShellEffect.DeleteModel(1, "Qwen2.5-1.5B")),
+            parse("model delete --force qwen2.5-1.5b", withDeletableModel).effects,
+        )
+    }
+
+    @Test
+    fun modelDeleteRefusesBuiltInSmokeModelEvenWithForce() {
+        assertTrue(parse("model delete 0", withDeletableModel).text().contains("内置冒烟模型不可删除"))
+        val forced = parse("model delete 0 --force", withDeletableModel)
+        assertTrue(forced.text().contains("内置冒烟模型不可删除"))
+        assertTrue(forced.effects.isEmpty())
+    }
+
+    @Test
+    fun modelDeleteRejectsUnknownOptionAndMultipleTargets() {
+        assertTrue(parse("model delete 1 --yes", withDeletableModel).text().contains("model delete 只支持 --force"))
+        assertTrue(parse("model delete 1 2", withDeletableModel).text().contains("只接受一个模型参数"))
+    }
+
+    @Test
+    fun modelDeleteRejectsUnknownModel() {
+        assertTrue(parse("model delete ghost", withDeletableModel).text().contains("未找到本地模型：ghost"))
+    }
+
     @Test
     fun modelImportRequestsSystemFilePicker() {
         val result = parse("model import")

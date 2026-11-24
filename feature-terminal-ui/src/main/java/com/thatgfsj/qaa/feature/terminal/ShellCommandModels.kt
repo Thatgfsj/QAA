@@ -38,8 +38,18 @@ enum class BackendRequest(val command: String, val displayName: String) {
     }
 }
 
-/** 本地模型条目：[index] 为清单序号——内置冒烟模型固定 0，下载 / 导入从 1 起。 */
-data class LocalModelEntry(val index: Int, val name: String, val quantization: String) {
+/**
+ * 本地模型条目：[index] 为清单序号——内置冒烟模型固定 0，下载 / 导入从 1 起。
+ *
+ * [sizeBytes] / [path] 供 `model delete` 的二次确认回显（体积与落点）；未接线时为 null。
+ */
+data class LocalModelEntry(
+    val index: Int,
+    val name: String,
+    val quantization: String,
+    val sizeBytes: Long? = null,
+    val path: String? = null,
+) {
     val displayText: String get() = "$name($quantization)"
 }
 
@@ -92,6 +102,9 @@ sealed interface ShellEffect {
 
     /** model import：打开系统文件选择器，选中 GGUF 后导入并登记。 */
     data object ImportModel : ShellEffect
+
+    /** model delete <序号|名称> --force：解析器已完成二次确认，交给端口执行删除（#111）。 */
+    data class DeleteModel(val ordinal: Int, val name: String) : ShellEffect
 
     /** storage grant：打开系统目录选择器，授权外部目录并挂载为沙盒根。 */
     data object GrantStorage : ShellEffect

@@ -82,6 +82,14 @@ class ModelCatalog(
         }
     }
 
+    /** 从持久清单注销（[RegisteredModel.key] 精确匹配；不存在时为空操作，供删除链路使用）。 */
+    suspend fun unregister(key: String) = withContext(ioDispatcher) {
+        registerMutex.withLock {
+            val entries = manifest.read().associateBy { it.key }.toMutableMap()
+            if (entries.remove(key) != null) manifest.write(entries.values)
+        }
+    }
+
     private suspend fun buildEntries(): List<CatalogEntry> {
         val registered = manifest.read().associateBy { it.key }
         val builtInFile = File(modelsDir, BUILT_IN_FILE_NAME)

@@ -19,7 +19,15 @@ import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
 
 /** 模型清单条目 → 终端展示条目（序号与量化对齐 UI 模型）。 */
 internal fun catalogToLocalEntries(entries: List<CatalogEntry>): List<LocalModelEntry> =
-    entries.map { LocalModelEntry(index = it.ordinal, name = it.name, quantization = it.quantization ?: "未知") }
+    entries.map {
+        LocalModelEntry(
+            index = it.ordinal,
+            name = it.name,
+            quantization = it.quantization ?: "未知",
+            sizeBytes = it.sizeBytes,
+            path = it.path,
+        )
+    }
 
 /** 拉取事件 → 终端投影。 */
 internal fun ModelPullEvent.toTerminalEvent(): TerminalPullEvent = when (this) {

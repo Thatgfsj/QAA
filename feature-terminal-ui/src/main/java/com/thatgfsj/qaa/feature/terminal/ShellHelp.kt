@@ -20,6 +20,7 @@ private val HELP_ROWS = listOf(
     HelpRow("model", "顶层", "列出本地模型"),
     HelpRow("model pull <url>", "顶层", "下载模型（断点续传）"),
     HelpRow("model import", "顶层", "导入模型（系统文件选择器）"),
+    HelpRow("model delete <序号>", "顶层", "删除模型（需 --force 确认）"),
     HelpRow("chat <模型名|序号>", "顶层", "进入 CHAT 会话"),
     HelpRow("agent [模型名|序号]", "顶层", "进入 AGENT 会话"),
     HelpRow("start window", "顶层", "切回正常窗口并重启"),
@@ -50,6 +51,7 @@ internal fun shellHelpText(): String = buildString {
     appendLine()
     appendLine("提示：")
     appendLine("· 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。")
+    appendLine("· model delete <序号|名称> 先回显删除影响，再次带 --force 才真正删除；内置 0 号与当前加载模型不可删。")
     appendLine("· chat / agent 支持模型名或序号（内置模型为 0 号，下载 / 导入从 1 起）；输入 model 查看本地模型清单。")
     appendLine("· backend 可选值：auto、npu、hybrid、cpu；无参数查看请求与实际命中。")
     appendLine("· /new 新建空会话并清屏，旧会话记录保留；/status 可查看当前会话 id。")
@@ -58,6 +60,10 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· /system 无参查看系统提示词全文与来源；带文本整体替换，/system reset 恢复默认；提示词每轮组装，下一轮生效。")
     append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
+
+/** 模型体积文案（一位小数 MB；未知时显示「未知」），供 model delete 二次确认回显。 */
+internal fun modelSizeText(bytes: Long?): String =
+    if (bytes == null) "未知" else "%.1f MB".format(java.util.Locale.ROOT, bytes / 1024f / 1024f)
 
 /** 本地模型清单：内置模型 0 号、下载 / 导入从 1 起，供 chat / agent 选型。 */
 internal fun localModelListText(models: List<LocalModelEntry>, current: TerminalModelInfo): String =
