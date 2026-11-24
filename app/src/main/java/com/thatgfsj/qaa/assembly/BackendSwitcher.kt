@@ -4,6 +4,7 @@ import com.thatgfsj.qaa.core.inference.ComputeBackend
 import com.thatgfsj.qaa.core.inference.LlmEnginePort
 import com.thatgfsj.qaa.core.inference.LlmLoadConfig
 import com.thatgfsj.qaa.feature.terminal.BackendRequest
+import java.io.File
 
 /** backend 锁定结果：装配层据此决定是否采纳新后端。 */
 internal sealed interface BackendSwitchResult {
@@ -60,6 +61,7 @@ internal class BackendSwitcher(
         request: BackendRequest,
     ): BackendSwitchResult {
         statusSink("正在切换推理后端并重载模型…")
+        AppLog.modelUnloaded(File(modelSource).name)
         engine.unload()
         val failure = engine.load(modelSource, LlmLoadConfig(backend = next)).exceptionOrNull()
         if (failure == null) {

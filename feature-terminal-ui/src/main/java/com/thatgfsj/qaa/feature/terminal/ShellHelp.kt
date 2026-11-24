@@ -35,6 +35,7 @@ private val HELP_ROWS = listOf(
     HelpRow("/steer <指令>", "会话", "运行中干预"),
     HelpRow("/skills", "会话", "查看可用技能"),
     HelpRow("/export [路径]", "会话", "导出当前分支轨迹"),
+    HelpRow("/logs [行数]", "全部", "导出应用内日志（默认 200 行）"),
 )
 
 /** 全中文命令表（命令、适用状态、说明三列）与输入约定提示。 */

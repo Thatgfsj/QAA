@@ -33,6 +33,9 @@ class FakeTerminalAgentPort(
     var skillsText = "技能注册表：注册 0 个"
     var exportText = "已导出当前分支轨迹：exports/session-main.jsonl（1 行）"
     val exportedPaths = mutableListOf<String?>()
+
+    var logsExportText = "已导出 200 行日志 → exports/logs/log-20260101-000000-000.txt（缓冲共 200 行）"
+    val exportedLogLines = mutableListOf<Int?>()
     var statusText = "模型清单：1 项"
     var newSessionText = "已新建会话：main-2"
     var newSessionCount = 0
@@ -70,6 +73,9 @@ class FakeTerminalAgentPort(
 
     override suspend fun exportTrace(path: String?): String =
         exportText.also { exportedPaths += path }
+
+    override suspend fun exportLogs(lines: Int?): String =
+        logsExportText.also { exportedLogLines += lines }
 
     override suspend fun statusExtra(): String = statusText
 

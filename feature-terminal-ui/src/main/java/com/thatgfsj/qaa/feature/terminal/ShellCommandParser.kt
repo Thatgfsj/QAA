@@ -34,6 +34,7 @@ object ShellCommandParser {
             "backend" -> parseBackend(tokens, context)
             "storage" -> parseStorage(tokens, context)
             "clear" -> parseClear(tokens, context)
+            "/logs" -> logs(tokens, context)
             "/status" -> statusResult(context)
             "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
             else -> unknownShellCommand(tokens.first(), context)
@@ -205,9 +206,10 @@ object ShellCommandParser {
             "/steer" -> steer(tokens, line, context)
             "/skills" -> singleEffect(tokens, context, "/skills", ShellEffect.QuerySkills)
             "/export" -> export(tokens, context)
+            "/logs" -> logs(tokens, context)
             else -> error(
                 context,
-                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export；" +
+                "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs；" +
                     "输入 /help 查看完整说明。",
             )
         }
@@ -243,6 +245,24 @@ object ShellCommandParser {
             stage = context.stage,
             effects = listOf(ShellEffect.ExportTrace(tokens.getOrNull(1))),
         )
+    }
+
+    /**
+     * /logs [行数]：行数缺省交给运行链（默认 200 行），显式给出时校验 1..[APP_LOG_MAX_LINES]。
+     * 两个阶段都可用：初始化失败时也能在 Shell 顶层态导出日志取证。
+     */
+    private fun logs(tokens: List<String>, context: ShellContext): ShellParseResult {
+        if (tokens.size > 2) return usage(context, "/logs [行数]", "/logs 最多接受一个行数参数。")
+        val token = tokens.getOrNull(1)
+            ?: return ShellParseResult(context.stage, effects = listOf(ShellEffect.ExportLogs(null)))
+        val lines = token.toIntOrNull()
+        if (lines == null || lines < 1 || lines > APP_LOG_MAX_LINES) {
+            return error(
+                context,
+                "行数无效：$token。用法：/logs [行数]，范围 1-$APP_LOG_MAX_LINES。",
+            )
+        }
+        return ShellParseResult(context.stage, effects = listOf(ShellEffect.ExportLogs(lines)))
     }
 
     private fun steer(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {

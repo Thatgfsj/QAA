@@ -34,10 +34,11 @@ class ShellHelpSnapshotTest {
             "/steer <指令>",
             "/skills",
             "/export [路径]",
+            "/logs [行数]",
         )
         val text = shellHelpText()
         commands.forEach { command -> assertTrue("缺少命令：$command", text.contains(command)) }
-        assertEquals(19, rowsOf(text).size)
+        assertEquals(20, rowsOf(text).size)
     }
 
     @Test
@@ -84,6 +85,7 @@ class ShellHelpSnapshotTest {
     /steer <指令>         会话      运行中干预
     /skills               会话      查看可用技能
     /export [路径]        会话      导出当前分支轨迹
+    /logs [行数]          全部      导出应用内日志（默认 200 行）
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
