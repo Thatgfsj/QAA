@@ -14,6 +14,7 @@
 | 双前端 | Normal 正常窗口 / Terminal 终端模式三段式布局，持久化 `ui_mode` 路由，切换即重启生效 |
 | 树状会话 | JSONL 树形节点存储，`/tree` `/fork` 任意节点分叉，可直接导出为 LoRA 微调轨迹 |
 | 渐进 Skills | 启动仅注入 SKILL.md 名称+一句话描述，命中任务才读全文，保护端侧 Prompt Cache |
+| 系统提示词可编辑 | 终端 `/system` 与 Normal 设置页同一份持久化（#105），保存后下一轮生效、不重载引擎；`/export` 轨迹带提示词来源标记 |
 | 内存互斥 | ModelMemoryCoordinator 状态机强管控，严禁 LLM 与画图模型同时驻留内存 |
 | 内置冒烟模型 | Supra2.5-Pro-Instruct（Q4_0 GGUF，67M 参数）打包进 APK，安装即运行、零网络 |
 
