@@ -15,14 +15,15 @@ data class ChatMessage(
     val content: String,
 )
 
-/** 内置模型目录条目（占位数据；真实模型管理属 Issue #6）。 */
+/** 模型目录条目；[ordinal] 为真实清单序号（0 表示骨架占位数据）。 */
 data class ModelInfo(
     val id: String,
     val name: String,
     val quantization: String,
-    val sizeBytes: Long,
+    val sizeBytes: Long?,
     val source: String,
     val loaded: Boolean,
+    val ordinal: Int = 0,
 )
 
 /**

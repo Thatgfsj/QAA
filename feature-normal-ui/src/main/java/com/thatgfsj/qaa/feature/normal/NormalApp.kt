@@ -30,6 +30,7 @@ import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
 import com.thatgfsj.qaa.feature.normal.confirm.NormalToolConfirmDialog
 import com.thatgfsj.qaa.feature.normal.models.ModelManageScreen
+import com.thatgfsj.qaa.feature.normal.models.NormalModelPort
 import com.thatgfsj.qaa.feature.normal.settings.SettingsScreen
 import com.thatgfsj.qaa.feature.normal.status.BackendStatusBar
 import com.thatgfsj.qaa.feature.normal.status.FakeInferenceStatusSource
@@ -51,6 +52,7 @@ object NormalRoutes {
  * [confirmGate] 为工具确认门（Issue #14）：本层装配中文确认对话框，AgentLoop 由 :app
  * 注入同一实例后即可在工具执行前挂起；[chatViewModel] 由本层持有并下发给会话页，
  * 避免 NavHost 目标页重复创建实例导致确认状态与确认门脱钩。
+ * [modelPort] 为模型下载/清单端口（Issue #80）：null 时模型页保持骨架占位。
  */
 @Composable
 fun NormalApp(
@@ -59,6 +61,7 @@ fun NormalApp(
     chatViewModel: ChatViewModel = viewModel(),
     confirmGate: NormalGate = remember { NormalGate() },
     agentPort: NormalAgentPort? = null,
+    modelPort: NormalModelPort? = null,
 ) {
     val navController = rememberNavController()
     val status by statusSource.status.collectAsStateWithLifecycle()
@@ -111,7 +114,7 @@ fun NormalApp(
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             composable(NormalRoutes.CHAT) { ChatScreen(viewModel = chatViewModel) }
-            composable(NormalRoutes.MODELS) { ModelManageScreen() }
+            composable(NormalRoutes.MODELS) { ModelManageScreen(modelPort = modelPort) }
             composable(NormalRoutes.SETTINGS) {
                 SettingsScreen(onSwitchToTerminal = onSwitchToTerminal)
             }

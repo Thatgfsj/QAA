@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
                         onSwitchToTerminal = ::switchToTerminal,
                         confirmGate = confirmGate,
                         agentPort = runtime,
+                        modelPort = runtime,
                     )
                 }
                 StartRoute.Terminal -> TerminalHost(
