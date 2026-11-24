@@ -51,6 +51,9 @@ fun TerminalScreen(
                 onSubmit = onSubmit,
                 onToolAllow = viewModel::onToolAllow,
                 onToolDeny = viewModel::onToolDeny,
+                // ↑ 长按 = clear：清屏同时复位会话级确认策略（#93）。
+                onClearScreen = viewModel::resetSession,
+                onAutoAllowMode = viewModel::rememberAutoAllow,
                 onNotice = viewModel::appendOutput,
             )
         }

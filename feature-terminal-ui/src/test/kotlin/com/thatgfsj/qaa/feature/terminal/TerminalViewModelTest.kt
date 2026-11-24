@@ -225,4 +225,47 @@ class TerminalViewModelTest {
         assertEquals(0.0, tick2.tokensPerSecond!!, 1e-9)
         assertEquals(48, tick3.tokensUsed)
     }
+
+    // ---- #93 会话级确认记忆（yes / no 长按） ----
+
+    @Test
+    fun rememberAllowStoresSessionPolicyAndResolvesPending() {
+        val vm = TerminalViewModel()
+        vm.requestToolConfirmation("write(\"a.txt\")")
+        vm.rememberAutoAllow(enabled = true)
+        val state = vm.uiState.value
+        assertEquals(ToolConfirmPolicy.AUTO_ALLOW, state.confirmPolicy)
+        val resolved = state.toolConfirm as ToolConfirmState.Resolved
+        assertTrue(resolved.allowed)
+    }
+
+    @Test
+    fun disableAutoAllowRestoresAskingWithoutFabricatingDecisions() {
+        val vm = TerminalViewModel()
+        // 未开启时关闭：状态无变化。
+        vm.rememberAutoAllow(enabled = false)
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
+        assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+        // 开启结算挂起；再关闭恢复逐次询问，且不伪造新决策。
+        vm.requestToolConfirmation("read(\".\")")
+        vm.rememberAutoAllow(enabled = true)
+        vm.rememberAutoAllow(enabled = false)
+        val state = vm.uiState.value
+        assertEquals(ToolConfirmPolicy.ASK, state.confirmPolicy)
+        val resolved = state.toolConfirm as ToolConfirmState.Resolved
+        assertTrue(resolved.allowed)
+    }
+
+    @Test
+    fun sessionMemoryResetsOnClearScreenAndOnExit() {
+        val vm = TerminalViewModel()
+        vm.rememberAutoAllow(enabled = true)
+        vm.resetSession()
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
+
+        vm.rememberAutoAllow(enabled = true)
+        vm.resetToolConfirmPolicy()
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
+        assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+    }
 }

@@ -44,6 +44,20 @@ class TerminalUiGateTest {
 
         fun deny() = resolve(allowed = false)
 
+        /** 模拟 yes 长按：写入会话级自动放行策略。 */
+        fun rememberAutoAllow() {
+            mutableState.value = mutableState.value.copy(
+                confirmPolicy = ToolConfirmPolicy.AUTO_ALLOW,
+            )
+        }
+
+        /** 模拟 no 长按：关闭自动放行，恢复逐次询问。 */
+        fun disableAutoAllow() {
+            mutableState.value = mutableState.value.copy(
+                confirmPolicy = ToolConfirmPolicy.ASK,
+            )
+        }
+
         private fun resolve(allowed: Boolean) {
             val pending = mutableState.value.toolConfirm as? ToolConfirmState.Pending ?: return
             mutableState.value = mutableState.value.copy(
@@ -117,6 +131,37 @@ class TerminalUiGateTest {
         val decision = async { gate.awaitConfirmation(writeCall) }
         runCurrent()
         assertFalse(decision.isCompleted) // requestId 不同，必须继续等待本次决策
+        host.deny()
+        assertEquals(ConfirmationDecision.DENY, decision.await())
+    }
+
+    // ---- #93 会话级自动决策 ----
+
+    @Test
+    fun 会话级自动放行不挂起并上报策略() = runTest {
+        val host = FakeHost()
+        host.rememberAutoAllow()
+        var reported: Pair<String, ToolConfirmPolicy>? = null
+        val gate = TerminalUiGate(host) { description, policy -> reported = description to policy }
+
+        assertEquals(ConfirmationDecision.ALLOW, gate.awaitConfirmation(writeCall))
+        assertEquals(ToolConfirmState.Idle, host.uiState.value.toolConfirm)
+        assertNotNull(reported)
+        assertTrue(reported!!.first.startsWith("write "))
+        assertEquals(ToolConfirmPolicy.AUTO_ALLOW, reported!!.second)
+    }
+
+    @Test
+    fun 关闭自动放行后确认门恢复挂起询问() = runTest {
+        val host = FakeHost()
+        host.rememberAutoAllow()
+        val gate = TerminalUiGate(host)
+        assertEquals(ConfirmationDecision.ALLOW, gate.awaitConfirmation(writeCall))
+
+        host.disableAutoAllow()
+        val decision = async { gate.awaitConfirmation(writeCall) }
+        runCurrent()
+        assertTrue(host.uiState.value.toolConfirm is ToolConfirmState.Pending)
         host.deny()
         assertEquals(ConfirmationDecision.DENY, decision.await())
     }

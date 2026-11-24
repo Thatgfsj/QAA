@@ -71,6 +71,10 @@ class TerminalShellController(
         // 顺序契约：先回显输入，再执行状态副作用（清屏会丢弃回显），最后追加中文输出。
         viewModel.onUserInput(input)
         result.effects.forEach(::applyEffect)
+        // 退出会话即结束会话级确认记忆（#93）：下次进入会话重新逐次询问。
+        if (stage == ShellStage.SESSION && result.stage == ShellStage.SHELL) {
+            viewModel.resetToolConfirmPolicy()
+        }
         stage = result.stage
         result.output.forEach(viewModel::appendOutput)
     }

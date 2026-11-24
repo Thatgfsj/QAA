@@ -413,4 +413,20 @@ class TerminalShellControllerTest {
         assertEquals(1, entries.size)
         assertTrue(entries.single().text.contains("模型加载失败"))
     }
+
+    // ---- #93 会话级确认记忆：/exit 离开会话即恢复询问 ----
+
+    @Test
+    fun exitSessionRestoresAskingPolicy() = runTest {
+        val viewModel = TerminalViewModel()
+        val shell = controller(viewModel, agent = FakeTerminalAgentPort(), scope = this)
+        shell.onInput("chat 0")
+        viewModel.rememberAutoAllow(enabled = true)
+        assertEquals(ToolConfirmPolicy.AUTO_ALLOW, viewModel.uiState.value.confirmPolicy)
+
+        shell.onInput("/exit")
+        advanceUntilIdle()
+        assertEquals(ShellStage.SHELL, shell.stage)
+        assertEquals(ToolConfirmPolicy.ASK, viewModel.uiState.value.confirmPolicy)
+    }
 }

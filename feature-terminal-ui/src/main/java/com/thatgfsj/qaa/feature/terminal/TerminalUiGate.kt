@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.withLock
  */
 interface TerminalToolConfirmHost {
 
-    /** 整页快照；确认门只读其中的 [TerminalUiState.toolConfirm]。 */
+    /** 整页快照；确认门只读其中的 [TerminalUiState.toolConfirm] 与 [TerminalUiState.confirmPolicy]。 */
     val uiState: StateFlow<TerminalUiState>
 
     /** 推送待确认项（工具名 + 参数摘要），同一时刻仅保留最新一条。 */
@@ -34,16 +34,26 @@ interface TerminalToolConfirmHost {
  * 同一时刻只允许一条挂起：Mutex 串行化，防止连续工具调用把确认区顶掉；
  * 取消（轮次中断 / 页面销毁）时收起确认区并向上传播 CancellationException，
  * 由 AgentLoop 放弃当前工具执行。
+ *
+ * 会话级记忆（#93）：快照里的 [TerminalUiState.confirmPolicy] 为自动放行时不再挂起，
+ * 直接放行，并经 [onAutoDecision] 通知装配层（日志 / 对话区提示）。
  */
 class TerminalUiGate(
     private val host: TerminalToolConfirmHost,
+    private val onAutoDecision: (description: String, policy: ToolConfirmPolicy) -> Unit = { _, _ -> },
 ) : ConfirmationGate {
 
     private val mutex = Mutex()
 
-    override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision =
-        mutex.withLock {
-            host.requestToolConfirmation(summarizeToolCall(call))
+    override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision {
+        val description = summarizeToolCall(call)
+        val policy = host.uiState.value.confirmPolicy
+        if (policy.autoDecision() == true) {
+            onAutoDecision(description, policy)
+            return ConfirmationDecision.ALLOW
+        }
+        return mutex.withLock {
+            host.requestToolConfirmation(description)
             val pending = host.uiState.value.toolConfirm as? ToolConfirmState.Pending
                 ?: error("确认区未进入待确认状态：${call.tool}")
             try {
@@ -57,4 +67,5 @@ class TerminalUiGate(
                 throw cancelled
             }
         }
+    }
 }
