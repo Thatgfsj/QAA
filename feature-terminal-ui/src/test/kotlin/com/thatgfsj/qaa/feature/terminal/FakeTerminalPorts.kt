@@ -89,6 +89,16 @@ class FakeTerminalAgentPort(
     override suspend fun setContextLength(tokens: Int): String =
         contextLengthSetText.also { contextLengths += tokens }
 
+    // ---- #105 /system 系统提示词 ----
+    var systemPromptText = "系统提示词（来源：默认，5 字）\n你好"
+    var systemPromptSetText = "已更新系统提示词（3 字，来源：自定义）；下一轮生效。"
+    val systemPromptSets = mutableListOf<String?>()
+
+    override suspend fun systemPrompt(): String = systemPromptText
+
+    override suspend fun setSystemPrompt(text: String?): String =
+        systemPromptSetText.also { systemPromptSets += text }
+
     override suspend fun newSession(): String = newSessionText.also { newSessionCount += 1 }
 }
 

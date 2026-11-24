@@ -1,5 +1,6 @@
 package com.thatgfsj.qaa.assembly
 
+import com.thatgfsj.qaa.core.harness.LoraTraceExporter
 import com.thatgfsj.qaa.core.harness.SessionNode
 import com.thatgfsj.qaa.core.harness.SessionRole
 
@@ -20,6 +21,18 @@ internal fun traceExportPath(sessionId: String, requested: String?): String {
         target + TRACE_EXPORT_EXTENSION
     }
 }
+
+/**
+ * /export 导出选项（#105）：把当前生效的系统提示词快照写进首条 system 消息，
+ * 并在 meta 旁注来源标记，保证轨迹可回溯「导出那一刻的提示词」。
+ * 来源标记只做分类，正文快照仍是权威依据。
+ */
+internal fun traceExportOptions(sessionId: String, systemPrompt: String): LoraTraceExporter.Options =
+    LoraTraceExporter.Options(
+        systemPrompt = systemPrompt,
+        branchLabel = sessionId,
+        extraMeta = mapOf("systemPromptSource" to systemPromptSource(systemPrompt)),
+    )
 
 /** 分支统计：导出时被剔除或旁注的节点规模（回显「行数 / 剔除统计」）。 */
 internal data class TraceBranchStats(

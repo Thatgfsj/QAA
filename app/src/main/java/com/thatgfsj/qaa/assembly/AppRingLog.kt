@@ -247,6 +247,12 @@ object AppLog {
         }
     }
 
+    /** 系统提示词变更（#105）：[custom] 为 false 表示恢复默认，供 /logs 回溯生效时机。 */
+    fun systemPromptChanged(custom: Boolean, length: Int) {
+        val action = if (custom) "已自定义（$length 字）" else "已恢复默认"
+        AppRingLog.global.info(TAG_RUNTIME, "系统提示词$action")
+    }
+
     /** 运行链错误码（失败原因短码 + 可读信息）。 */
     fun error(code: String, message: String) {
         AppRingLog.global.error(TAG_RUNTIME, "$code${suffix(message)}")

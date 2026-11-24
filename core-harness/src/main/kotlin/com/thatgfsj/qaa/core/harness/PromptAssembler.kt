@@ -9,9 +9,22 @@ package com.thatgfsj.qaa.core.harness
  * 保护窗口裁剪由压缩议题替换全量历史时生效，本类只固定段序与稳定前缀纪律。
  */
 class PromptAssembler(
-    private val systemSection: String = DEFAULT_SYSTEM_PROMPT,
+    systemSection: String = DEFAULT_SYSTEM_PROMPT,
     private val skillsSection: String = "",
 ) {
+
+    /**
+     * 系统段（稳定前缀首段，#105）：终端 /system 与 Normal 设置页修改后经 [updateSystemSection]
+     * 更新；未修改时同一会话内字节级不变，保持 NPU Prompt Cache 命中语义。
+     */
+    @Volatile
+    var systemSection: String = systemSection
+        private set
+
+    /** 运行期替换系统段（#105）：下一次 [assemble] 生效，不改动段序与其他段。 */
+    fun updateSystemSection(section: String) {
+        systemSection = section
+    }
 
     fun assemble(
         history: List<TurnNode>,

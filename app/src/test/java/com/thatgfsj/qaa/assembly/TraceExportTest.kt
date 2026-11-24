@@ -64,6 +64,34 @@ class TraceExportTest {
         assertTrue(text.contains("解析重试 1 节点"))
     }
 
+    // ---- #105 /export 系统提示词快照 ----
+
+    @Test
+    fun 导出选项_记录提示词快照与来源标记() {
+        val custom = "自定义系统提示词：只回答中文。"
+
+        val options = traceExportOptions("main", custom)
+
+        assertEquals(custom, options.systemPrompt)
+        assertEquals(mapOf("systemPromptSource" to "自定义"), options.extraMeta)
+    }
+
+    @Test
+    fun 导出正文_首条系统消息为当前提示词快照() {
+        val custom = "自定义系统提示词：只回答中文。"
+        val branch = listOf(
+            node("n1", SessionRole.USER),
+            node("n2", SessionRole.ASSISTANT),
+        )
+
+        val line = com.thatgfsj.qaa.core.harness.LoraTraceExporter
+            .export(branch, traceExportOptions("main", custom))
+
+        requireNotNull(line)
+        assertTrue(line.contains(custom))
+        assertTrue(line.contains("\"systemPromptSource\":\"自定义\""))
+    }
+
     private fun node(id: String, role: SessionRole, parseRetries: Int = 0): SessionNode =
         SessionNode(id = id, parentId = null, role = role, content = "内容", parseRetries = parseRetries)
 }

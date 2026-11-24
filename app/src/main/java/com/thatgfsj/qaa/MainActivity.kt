@@ -10,9 +10,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.thatgfsj.qaa.assembly.AgentRuntime
 import com.thatgfsj.qaa.core.harness.ContextWindow
+import com.thatgfsj.qaa.core.harness.PromptAssembler
 import com.thatgfsj.qaa.data.ContextLengthStore
+import com.thatgfsj.qaa.data.SystemPromptStore
 import com.thatgfsj.qaa.data.UiModeStore
 import com.thatgfsj.qaa.data.dataStoreContextLengthStore
+import com.thatgfsj.qaa.data.dataStoreSystemPromptStore
 import com.thatgfsj.qaa.data.dataStoreUiModeStore
 import com.thatgfsj.qaa.feature.normal.NormalApp
 import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
@@ -30,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     private val uiModeStore: UiModeStore by lazy { dataStoreUiModeStore(this) }
     private val contextLengthStore: ContextLengthStore by lazy { dataStoreContextLengthStore(this) }
+    private val systemPromptStore: SystemPromptStore by lazy { dataStoreSystemPromptStore(this) }
     private val restarter: AppRestarter by lazy { ActivityAppRestarter(this) }
     private val runtime: AgentRuntime by lazy { AgentRuntime.create(this) }
 
@@ -41,6 +45,9 @@ class MainActivity : ComponentActivity() {
             // 上下文长度设置（#106）：设置页只保存，重新载入模型（或终端 /ctx）后生效。
             val contextTokens by contextLengthStore.tokens
                 .collectAsStateWithLifecycle(initialValue = ContextWindow.DEFAULT)
+            // 系统提示词设置（#105）：与终端 /system 共用 DataStore，保存后下一轮组装生效。
+            val systemPrompt by systemPromptStore.prompt
+                .collectAsStateWithLifecycle(initialValue = PromptAssembler.DEFAULT_SYSTEM_PROMPT)
             when (val route = mode?.let(::resolveStartRoute)) {
                 StartRoute.Normal -> {
                     // 确认门在组合期绑定到运行链：工具执行前由中文对话框挂起决策。
@@ -57,6 +64,9 @@ class MainActivity : ComponentActivity() {
                         modelPort = runtime,
                         contextTokens = contextTokens,
                         onContextTokensChange = ::saveContextLength,
+                        systemPrompt = systemPrompt,
+                        onSystemPromptSave = ::saveSystemPrompt,
+                        onSystemPromptReset = ::resetSystemPrompt,
                     )
                 }
                 StartRoute.Terminal -> TerminalHost(
@@ -79,6 +89,18 @@ class MainActivity : ComponentActivity() {
     /** 设置页"上下文长度"接线（#106）：只保存，不重载引擎；立即生效走终端 /ctx。 */
     private fun saveContextLength(tokens: Int) {
         lifecycleScope.launch { contextLengthStore.setTokens(tokens) }
+    }
+
+    /** 设置页"保存系统提示词"接线（#105）：写同一 DataStore key，空白草稿等价恢复默认。 */
+    private fun saveSystemPrompt(text: String) {
+        lifecycleScope.launch {
+            if (text.isBlank()) systemPromptStore.reset() else systemPromptStore.setPrompt(text)
+        }
+    }
+
+    /** 设置页"恢复默认系统提示词"接线（#105）。 */
+    private fun resetSystemPrompt() {
+        lifecycleScope.launch { systemPromptStore.reset() }
     }
 
     /** 终端 `start window` 接线：写 ui_mode = NORMAL → 立即重启回正常窗口。 */

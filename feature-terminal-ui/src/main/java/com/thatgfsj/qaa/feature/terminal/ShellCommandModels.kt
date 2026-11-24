@@ -120,6 +120,12 @@ sealed interface ShellEffect {
     /** /ctx <档位>：切换上下文长度（≤8192 且已加载时自动重载，>8192 只保存）（#106）。 */
     data class SetContextLength(val tokens: Int) : ShellEffect
 
+    /** /system：查询系统提示词全文与来源（默认 / 自定义）（#105）。 */
+    data object QuerySystemPrompt : ShellEffect
+
+    /** /system <文本|reset>：整体替换系统提示词；text 为 null 表示恢复默认（#105）。 */
+    data class SetSystemPrompt(val text: String?) : ShellEffect
+
     /** /status 追加运行态明细（模型清单数、会话树规模、待处理输入）。 */
     data object QueryStatusExtra : ShellEffect
 
