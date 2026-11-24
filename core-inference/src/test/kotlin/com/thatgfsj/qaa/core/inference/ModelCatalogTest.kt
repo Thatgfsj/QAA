@@ -48,7 +48,7 @@ class ModelCatalogTest {
     fun SDK清单合并_local前缀判IMPORT其余判PULL(@TempDir dir: File, @TempDir sdkDir: File) = runTest {
         val hfDir = File(sdkDir, "hf").apply { mkdirs() }
         val localDir = File(sdkDir, "local").apply { mkdirs() }
-        val pulled = writeFile(hfDir, "Supra2.5-Pro-Instruct-Q4_0.gguf", 1234)
+        val pulled = writeFile(hfDir, "Supra2.5-Pro-Instruct-Q4_K_M.gguf", 1234)
         val imported = writeFile(localDir, "Imported-Q8_0.gguf", 8)
         val gateway = FakeInventoryGateway(
             installed = listOf("liodon-ai/Supra2.5-Pro-Instruct-GGUF", "local/imported"),
@@ -61,9 +61,88 @@ class ModelCatalogTest {
         val pull = entries.single { it.path == pulled.absolutePath }
         assertEquals(ModelSource.PULL, pull.source)
         assertEquals("Supra2.5-Pro-Instruct", pull.name)
-        assertEquals("Q4_0", pull.quantization)
+        assertEquals("Q4_K_M", pull.quantization)
         assertEquals(1234L, pull.sizeBytes)
         assertEquals(ModelSource.IMPORT, entries.single { it.path == imported.absolutePath }.source)
+    }
+
+    @Test
+    fun 内置模型影子条目_多份工作副本只保留零号且不随读取累积(
+        @TempDir dir: File,
+        @TempDir sdkDir: File,
+    ) = runTest {
+        // 复现 #98：SDK 为内置模型保留多份托管名 / 缓存副本，文件名与内置资产一致但路径互不相同。
+        val works = (1..5).map { index ->
+            val workDir = File(sdkDir, "work-$index").apply { mkdirs() }
+            writeFile(workDir, ModelCatalog.BUILT_IN_FILE_NAME, 100 + index)
+        }
+        val names = works.indices.map { "local/supra2.5-pro-instruct-q4_0-$it" }
+        val gateway = FakeInventoryGateway(
+            installed = names,
+            paths = names.zip(works).toMap().mapValues { (_, file) -> modelPaths(file) },
+        )
+        val catalog = ModelCatalog(dir, gateway, Dispatchers.Unconfined)
+        val entries = catalog.list()
+        assertEquals(1, entries.size)
+        assertEquals(ModelCatalog.BUILT_IN_NAME, entries.single().name)
+        assertEquals(0, entries.single().ordinal)
+        // 同一实例重复读取、以及「冷启动」新建实例都得到同一份清单：影子条目不累积、不复活。
+        assertEquals(entries, catalog.list())
+        assertEquals(entries, ModelCatalog(dir, gateway, Dispatchers.Unconfined).list())
+    }
+
+    @Test
+    fun 同一模型多路径_按身份去重只出现一次(@TempDir dir: File, @TempDir sdkDir: File) = runTest {
+        val first = writeFile(File(sdkDir, "a").apply { mkdirs() }, "Qwen3-4B-Q4_K_M.gguf", 10)
+        val second = writeFile(File(sdkDir, "b").apply { mkdirs() }, "Qwen3-4B-Q4_K_M.gguf", 20)
+        val gateway = FakeInventoryGateway(
+            installed = listOf("local/qwen3-4b", "local/qwen3-4b-copy"),
+            paths = mapOf(
+                "local/qwen3-4b" to modelPaths(first),
+                "local/qwen3-4b-copy" to modelPaths(second),
+            ),
+        )
+        val entries = ModelCatalog(dir, gateway, Dispatchers.Unconfined).list()
+        assertEquals(listOf(ModelCatalog.BUILT_IN_NAME, "Qwen3-4B"), entries.map { it.name })
+        assertEquals(listOf(0, 1), entries.map { it.ordinal })
+        assertEquals("Q4_K_M", entries[1].quantization)
+        assertEquals(ModelSource.IMPORT, entries[1].source)
+    }
+
+    @Test
+    fun 路径缺失_仍按身份去重(@TempDir dir: File) = runTest {
+        // SDK 能报出托管名、但取不到可用文件路径（model_path 为空）：旧实现只按路径去重会漏；
+        // 身份键必须兜底，同一模型的两个托管名不得变成两条清单条目，也不能混进内置模型身份。
+        val noPath = ModelPaths(
+            model_path = "",
+            model_dir = "",
+            model_name = "Qwen3-4B-Q4_K_M",
+            runtime_id = "llama_cpp",
+            model_type = ModelType.LLM,
+            mmproj_path = null,
+            tokenizer_path = null,
+        )
+        val gateway = FakeInventoryGateway(
+            installed = listOf("Qwen3-4B-Q4_K_M", "Qwen3-4B-Q4_K_M"),
+            paths = mapOf("Qwen3-4B-Q4_K_M" to noPath),
+        )
+        val entries = ModelCatalog(dir, gateway, Dispatchers.Unconfined).list()
+        assertEquals(listOf(ModelCatalog.BUILT_IN_NAME, "Qwen3-4B"), entries.map { it.name })
+        assertEquals(listOf(0, 1), entries.map { it.ordinal })
+        assertNull(entries[1].path)
+    }
+
+    @Test
+    fun 删除模型_清单收缩且序号连续不复活(@TempDir dir: File) = runTest {
+        // #111 兼容：去重与序号都按当前清单推导，删除文件后清单收缩、序号连续，旧条目不再出现。
+        val alpha = writeFile(dir, "Alpha-Q4_0.gguf", 3)
+        writeFile(dir, "Zeta-Q8_0.gguf", 5)
+        val catalog = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined)
+        assertEquals(listOf(ModelCatalog.BUILT_IN_NAME, "Alpha", "Zeta"), catalog.list().map { it.name })
+        assertTrue(alpha.delete())
+        val after = catalog.list()
+        assertEquals(listOf(ModelCatalog.BUILT_IN_NAME, "Zeta"), after.map { it.name })
+        assertEquals(listOf(0, 1), after.map { it.ordinal })
     }
 
     @Test

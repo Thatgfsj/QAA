@@ -125,6 +125,22 @@ class AssetModelReleaserTest {
         assertTrue(dir.listFiles().isNullOrEmpty(), "不应残留 .tmp 半成品")
         assertTrue(releaser.progress.value < 1f)
     }
+
+    @Test
+    fun 重名资产_只释放一份且返回列表去重(@TempDir dir: File) = runTest {
+        val data = bytes(2048)
+        // #98：资产源（或打包清单）出现重名时释放结果不得重复登记同一路径，
+        // 否则上层清单会为同一文件凭空多出一条影子模型。
+        val duplicated = object : AssetSource {
+            override fun listModels(): List<String> = listOf("dup.gguf", "dup.gguf")
+            override fun open(name: String): InputStream = ByteArrayInputStream(data)
+        }
+        val releaser = AssetModelReleaser(duplicated, dir, Dispatchers.Unconfined)
+        val released = releaser.releaseAll()
+        assertEquals(listOf(File(dir, "dup.gguf")), released)
+        assertArrayEquals(data, File(dir, "dup.gguf").readBytes())
+        assertEquals(1f, releaser.progress.value)
+    }
 }
 
 /** 确定性伪字节内容。 */

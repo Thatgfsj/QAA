@@ -18,7 +18,8 @@ import kotlinx.coroutines.yield
  * 首次启动时把 assets/models/ 下全部 .gguf 释放到 App 私有目录
  * （约定为 filesDir/models/），路径与文件名保持一致，实现安装即离线运行：
  *
- * - 幂等：目标存在且大小与源资产一致则跳过；不一致则重新释放；
+ * - 幂等：目标存在且大小与源资产一致则跳过；不一致则重新释放；资产清单里的重名条目
+ *   （同一模型被多处声明）只释放一次，返回列表也按文件名去重；
  * - 进度：[progress] 按全部模型累计字节数加权（0.0-1.0，StateFlow 合并高频中间值）；
  * - 结果：[releaseAll] 返回释放后的模型 File 列表，供 Issue #5 的 LlmEngine
  *   按路径直接加载（本期只交付释放，不做任何引擎加载调用）。
@@ -61,7 +62,8 @@ class AssetModelReleaser(
 
     private suspend fun releaseLocked(): List<File> {
         _progress.value = IDLE
-        val names = assets.listModels()
+        // #98：资产清单可能重复声明同一模型——去重后只释放 / 返回一次，避免清单出现重复文件条目。
+        val names = assets.listModels().distinct()
         if (names.isEmpty()) {
             _progress.value = COMPLETE
             return emptyList()
