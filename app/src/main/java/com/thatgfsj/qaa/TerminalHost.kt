@@ -51,6 +51,8 @@ fun TerminalHost(
     }
     LaunchedEffect(runtime, terminalViewModel) {
         terminalViewModel.bindEngineMetrics(runtime.metrics)
+        // 模型载入占位行同样订阅运行链状态流：切换全程有反馈，完成即静默移除。
+        terminalViewModel.bindModelLoad(runtime.modelLoad)
     }
     LaunchedEffect(runtime, terminalViewModel) {
         runtime.events.collect { event ->

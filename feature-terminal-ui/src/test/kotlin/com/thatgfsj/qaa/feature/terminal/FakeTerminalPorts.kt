@@ -13,6 +13,14 @@ class FakeTerminalAgentPort(
     private val _state = MutableStateFlow(initial)
     override val state: StateFlow<TerminalAgentState> = _state
 
+    private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
+    override val modelLoad: StateFlow<TerminalModelLoadState> = _modelLoad
+
+    /** 测试主动推送载入进度（状态流驱动，不依赖计时）。 */
+    fun setModelLoad(next: TerminalModelLoadState) {
+        _modelLoad.value = next
+    }
+
     val turns = mutableListOf<String>()
     val steers = mutableListOf<String>()
     val followUps = mutableListOf<String>()

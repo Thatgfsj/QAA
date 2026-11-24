@@ -52,6 +52,7 @@ import com.thatgfsj.qaa.feature.terminal.LocalModelEntry
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentPort
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentState
 import com.thatgfsj.qaa.feature.terminal.TerminalMetricsSnapshot
+import com.thatgfsj.qaa.feature.terminal.TerminalModelLoadState
 import com.thatgfsj.qaa.feature.terminal.TerminalModelListPort
 import com.thatgfsj.qaa.feature.terminal.TerminalModelPullPort
 import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
@@ -199,6 +200,7 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     private val _state = MutableStateFlow(TerminalAgentState.PREPARING)
     private val _status = MutableStateFlow(PREPARING_TEXT)
+    private val _modelLoad = MutableStateFlow<TerminalModelLoadState>(TerminalModelLoadState.Idle)
     private val backendSwitcher = BackendSwitcher(engine) { _status.value = it }
 
     override val state: StateFlow<TerminalAgentState> = _state.asStateFlow()
@@ -208,6 +210,9 @@ class AgentRuntime private constructor(private val appContext: Context) :
 
     /** 统计栏指标流（真实推理指标）。 */
     val metrics: StateFlow<TerminalMetricsSnapshot> = llmGateway.metrics
+
+    /** 模型载入进度流：载入开始置 Loading，结束（无论成败）回到 Idle。 */
+    override val modelLoad: StateFlow<TerminalModelLoadState> = _modelLoad.asStateFlow()
 
     /** 轮次事件流（终端逐条回显）。 */
     val events: SharedFlow<AgentEvent> = recorder.events
@@ -261,7 +266,13 @@ class AgentRuntime private constructor(private val appContext: Context) :
             ?: return "未找到本地模型：$token。输入 model 查看清单（名称或序号，内置模型为 0 号）。"
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
         if (engine.isLoaded.value && loadedModelSource == path) return "模型已在运行：${entry.name}"
-        val result = engine.load(path, LlmLoadConfig(backend = backend))
+        // 切换耗时由运行链状态流广播：终端占位行据此出现 / 移除，UI 不做耗时估算。
+        _modelLoad.value = TerminalModelLoadState.Loading(entry.name)
+        val result = try {
+            engine.load(path, LlmLoadConfig(backend = backend))
+        } finally {
+            _modelLoad.value = TerminalModelLoadState.Idle
+        }
         loadedModelSource = path
         return result.fold(
             onSuccess = {
@@ -469,7 +480,12 @@ class AgentRuntime private constructor(private val appContext: Context) :
                 return@withLock
             }
             _status.value = "正在加载模型 ${source.name}…"
-            engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).getOrThrow()
+            _modelLoad.value = TerminalModelLoadState.Loading(source.name)
+            try {
+                engine.load(source.absolutePath, LlmLoadConfig(backend = backend)).getOrThrow()
+            } finally {
+                _modelLoad.value = TerminalModelLoadState.Idle
+            }
             loadedModelSource = source.absolutePath
             initialized = true
             _state.value = TerminalAgentState.IDLE

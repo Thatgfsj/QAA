@@ -46,6 +46,7 @@ fun ModelManageScreen(
     val resume by viewModel.resumeTask.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val bound by viewModel.portBound.collectAsStateWithLifecycle()
+    val loadingOrdinal by viewModel.loadingOrdinal.collectAsStateWithLifecycle()
 
     // 端口注入幂等；进入页面即做恢复检测与清单刷新（未完成下载提示继续）。
     LaunchedEffect(modelPort) { viewModel.bindPort(modelPort) }
@@ -80,7 +81,12 @@ fun ModelManageScreen(
             }
         }
         items(models, key = { it.id }) { model ->
-            ModelCard(model = model, onActivate = { viewModel.activate(model) })
+            ModelCard(
+                model = model,
+                loading = loadingOrdinal != null && loadingOrdinal == model.ordinal,
+                busy = loadingOrdinal != null,
+                onActivate = { viewModel.activate(model) },
+            )
         }
     }
 }
@@ -193,7 +199,12 @@ private fun NoticeCard(message: String) {
 }
 
 @Composable
-private fun ModelCard(model: ModelInfo, onActivate: () -> Unit) {
+private fun ModelCard(
+    model: ModelInfo,
+    loading: Boolean,
+    busy: Boolean,
+    onActivate: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -205,7 +216,7 @@ private fun ModelCard(model: ModelInfo, onActivate: () -> Unit) {
                     text = model.name + "（" + model.quantization + "）",
                     style = MaterialTheme.typography.titleMedium,
                 )
-                LoadedBadge(loaded = model.loaded)
+                LoadedBadge(loaded = model.loaded, loading = loading)
             }
             Spacer(Modifier.height(6.dp))
             Text(
@@ -215,17 +226,21 @@ private fun ModelCard(model: ModelInfo, onActivate: () -> Unit) {
             )
             Text(text = "体积：" + formatSize(model.sizeBytes), style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(10.dp))
-            Button(onClick = onActivate) {
-                Text(text = if (model.loaded) "卸载" else "加载")
+            Button(onClick = onActivate, enabled = !busy) {
+                Text(text = when {
+                    loading -> "载入中…"
+                    model.loaded -> "卸载"
+                    else -> "加载"
+                })
             }
         }
     }
 }
 
 @Composable
-private fun LoadedBadge(loaded: Boolean) {
+private fun LoadedBadge(loaded: Boolean, loading: Boolean) {
     Surface(
-        color = if (loaded) {
+        color = if (loaded || loading) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceVariant
@@ -233,7 +248,11 @@ private fun LoadedBadge(loaded: Boolean) {
         shape = MaterialTheme.shapes.small,
     ) {
         Text(
-            text = if (loaded) "已加载" else "未加载",
+            text = when {
+                loading -> "载入中"
+                loaded -> "已加载"
+                else -> "未加载"
+            },
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             style = MaterialTheme.typography.labelMedium,
         )

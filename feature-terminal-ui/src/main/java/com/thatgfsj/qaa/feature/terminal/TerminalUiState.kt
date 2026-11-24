@@ -42,6 +42,8 @@ data class TerminalEntry(
     val id: Long,
     val role: TerminalRole,
     val text: String,
+    /** 临时占位行标签（如模型载入进度）：同一标签只保留一行，结束后移除；普通行为 null。 */
+    val tag: String? = null,
 )
 
 /** 顶部常驻栏模型信息：模型名(量化)。默认值为冒烟模型（docs/ARCHITECTURE.md 第 1 节）。 */
