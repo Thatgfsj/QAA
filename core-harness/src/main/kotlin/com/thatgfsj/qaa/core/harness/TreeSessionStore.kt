@@ -224,6 +224,13 @@ class TreeSessionStore(
     /**
      * 渲染整棵会话树（设计文档 5.4）：节点 id、role、内容首行摘要、工具状态、
      * 分叉点标记；活动分支以 ● 标记，当前活动叶标注“← 活动叶子”。
+     *
+     * 摘要节点额外标注被压缩范围与保护状态（`[摘要 覆盖 n-000001..n-000004，N 节点 · 受保护]`），
+     * 便于 /tree 直接看出哪段历史已被摘要取代；摘要节点按设计文档 6.4/6.1 属保护窗口，
+     * 后续压缩不会再覆盖，故标「受保护」。
+     *
+     * 健壮性（#99）：只要存在节点就绝不返回空串——父链成环 / 数据损坏导致找不到根时，
+     * 剩余节点按写入顺序平铺并给出中文说明，避免终端 /tree 静默无输出。
      */
     @Synchronized
     fun renderTree(): String {
@@ -235,6 +242,7 @@ class TreeSessionStore(
             .groupBy { it.parentId!! }
         val roots = nodesById.values.filter { it.parentId == null || it.parentId !in nodesById }
         val builder = StringBuilder()
+        val rendered = HashSet<String>()
         val stack = ArrayDeque<RenderFrame>()
         for (index in roots.indices.reversed()) {
             stack.addLast(RenderFrame(roots[index], prefix = "", isLast = index == roots.lastIndex, isRoot = true))
@@ -244,6 +252,7 @@ class TreeSessionStore(
             if (!frame.isRoot) {
                 builder.append(frame.prefix).append(if (frame.isLast) BRANCH_LAST else BRANCH_MIDDLE)
             }
+            rendered += frame.node.id
             builder.append(if (frame.node.id in activePath) ACTIVE_MARK else IDLE_MARK)
             builder.append(describeNode(frame.node, childCounts))
             builder.append('\n')
@@ -257,7 +266,15 @@ class TreeSessionStore(
                 stack.addLast(RenderFrame(children[index], childPrefix, index == children.lastIndex, isRoot = false))
             }
         }
-        return builder.toString().trimEnd()
+        // 防御（#99）：父链成环 / 数据损坏时可能没有任何根节点；剩余节点平铺，绝不静默返回空串。
+        val unrooted = nodesById.values.filter { it.id !in rendered }
+        if (unrooted.isNotEmpty()) {
+            builder.append(UNROOTED_NOTICE).append('\n')
+            unrooted.forEach { node ->
+                builder.append(IDLE_MARK).append(describeNode(node, childCounts)).append('\n')
+            }
+        }
+        return builder.toString().trimEnd().ifBlank { EMPTY_SESSION_TEXT }
     }
 
     /** 重新从磁盘加载（关闭并重开写句柄）；用于外部改写文件后的刷新。 */
@@ -284,12 +301,29 @@ class TreeSessionStore(
         builder.append(" [").append(node.role.wire)
         if (node.role == SessionRole.TOOL && node.tool != null) builder.append('/').append(node.tool)
         builder.append("] ").append(summarize(node.content))
+        if (node.role == SessionRole.SUMMARY) builder.append(summaryAnnotation(node))
         node.toolStatus?.let { builder.append(' ').append(it.name) }
         if (node.role == SessionRole.ASSISTANT && node.toolCalls.isNotEmpty()) {
             builder.append(" ⇢ ").append(node.toolCalls.joinToString(" ") { it.tool })
         }
         if ((childCounts[node.id] ?: 0) > 1) builder.append(" ⑂分叉点")
         if (node.id == leafId) builder.append(" ← 活动叶子")
+        return builder.toString()
+    }
+
+    /** 摘要节点标注：被压缩范围（coveredFrom..coveredTo）、节点数与保护状态（#99）。 */
+    private fun summaryAnnotation(node: SessionNode): String {
+        val builder = StringBuilder(" [摘要")
+        node.compaction?.let { compaction ->
+            builder.append(" 覆盖 ")
+                .append(compaction.coveredFrom)
+                .append("..")
+                .append(compaction.coveredTo)
+                .append("，")
+                .append(compaction.nodeCount)
+                .append(" 节点")
+        }
+        builder.append(" · 受保护]")
         return builder.toString()
     }
 
@@ -456,6 +490,9 @@ class TreeSessionStore(
         const val DEFAULT_SESSIONS_DIR: String = "sessions"
         const val EMPTY_SESSION_TEXT: String = "（空会话）"
         const val BLANK_CONTENT: String = "（空）"
+
+        /** 无根节点（父链成环 / 数据损坏）时的中文说明（#99 兜底渲染）。 */
+        const val UNROOTED_NOTICE: String = "（以下节点未挂到根，按写入顺序平铺）"
 
         private const val NODE_ID_PREFIX = "n-"
         private const val NODE_ID_PAD = 6

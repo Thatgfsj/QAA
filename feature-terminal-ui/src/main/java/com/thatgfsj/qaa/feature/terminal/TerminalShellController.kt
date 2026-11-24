@@ -105,7 +105,8 @@ class TerminalShellController(
             ShellEffect.ImportModel -> onRequestModelImport()
             ShellEffect.GrantStorage -> onRequestStorageGrant()
             is ShellEffect.PullModel -> pullModel(effect.url)
-            ShellEffect.QueryTree -> query { required(it.tree()) }
+            // #99：/tree 一律经 sessionTreeOutput 兜底，空树给空态提示、非空补图例。
+            ShellEffect.QueryTree -> query { sessionTreeOutput(it.tree()) }
             is ShellEffect.ForkNode -> query { required(it.fork(effect.nodeId)) }
             ShellEffect.CompactContext -> query { required(it.compact()) }
             ShellEffect.QuerySkills -> query { required(it.skills()) }
@@ -166,6 +167,9 @@ class TerminalShellController(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                "命令执行失败：${error.message ?: error::class.simpleName}"
+            } catch (error: Throwable) {
+                // #99：连 Error 也转成中文回执，绝不静默——真机曾出现 /tree 无任何输出。
                 "命令执行失败：${error.message ?: error::class.simpleName}"
             }
             viewModel.appendOutput(text)
