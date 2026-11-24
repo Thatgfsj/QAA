@@ -303,22 +303,26 @@ class TerminalViewModel internal constructor(
     }
 
     /**
-     * 长按 yes / no（#93）：把本次决策升格为会话级策略，并立即结算当前挂起项（若有）。
-     *
-     * 之后确认门不再挂起，直接按策略放行 / 拒绝；清屏、退出会话或新建会话后恢复询问。
+     * 长按 yes / no（#93）：yes 开启本会话自动放行，并立即结算当前挂起项（若有）；
+     * no 关闭自动放行、恢复逐次询问，挂起项保持待人工决策，不伪造结果。
      */
-    fun rememberToolDecision(allowed: Boolean) {
-        val policy = ToolConfirmPolicy.forDecision(allowed)
+    fun rememberAutoAllow(enabled: Boolean) {
         updateState { state ->
-            val pending = state.toolConfirm as? ToolConfirmState.Pending
-            state.copy(
-                confirmPolicy = policy,
-                toolConfirm = if (pending == null) {
-                    state.toolConfirm
-                } else {
-                    ToolConfirmState.Resolved(pending.requestId, pending.description, allowed)
-                },
-            )
+            if (enabled) {
+                val pending = state.toolConfirm as? ToolConfirmState.Pending
+                state.copy(
+                    confirmPolicy = ToolConfirmPolicy.AUTO_ALLOW,
+                    toolConfirm = if (pending == null) {
+                        state.toolConfirm
+                    } else {
+                        ToolConfirmState.Resolved(pending.requestId, pending.description, allowed = true)
+                    },
+                )
+            } else if (state.confirmPolicy == ToolConfirmPolicy.AUTO_ALLOW) {
+                state.copy(confirmPolicy = ToolConfirmPolicy.ASK)
+            } else {
+                state
+            }
         }
     }
 

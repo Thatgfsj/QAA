@@ -35,8 +35,8 @@ interface TerminalToolConfirmHost {
  * 取消（轮次中断 / 页面销毁）时收起确认区并向上传播 CancellationException，
  * 由 AgentLoop 放弃当前工具执行。
  *
- * 会话级记忆（#93）：快照里的 [TerminalUiState.confirmPolicy] 不是 ASK 时不再挂起，
- * 直接按策略放行 / 拒绝，并经 [onAutoDecision] 通知装配层（日志 / 对话区提示）。
+ * 会话级记忆（#93）：快照里的 [TerminalUiState.confirmPolicy] 为自动放行时不再挂起，
+ * 直接放行，并经 [onAutoDecision] 通知装配层（日志 / 对话区提示）。
  */
 class TerminalUiGate(
     private val host: TerminalToolConfirmHost,
@@ -48,10 +48,9 @@ class TerminalUiGate(
     override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision {
         val description = summarizeToolCall(call)
         val policy = host.uiState.value.confirmPolicy
-        val auto = policy.autoDecision()
-        if (auto != null) {
+        if (policy.autoDecision() == true) {
             onAutoDecision(description, policy)
-            return if (auto) ConfirmationDecision.ALLOW else ConfirmationDecision.DENY
+            return ConfirmationDecision.ALLOW
         }
         return mutex.withLock {
             host.requestToolConfirmation(description)

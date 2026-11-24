@@ -232,7 +232,7 @@ class TerminalViewModelTest {
     fun rememberAllowStoresSessionPolicyAndResolvesPending() {
         val vm = TerminalViewModel()
         vm.requestToolConfirmation("write(\"a.txt\")")
-        vm.rememberToolDecision(allowed = true)
+        vm.rememberAutoAllow(enabled = true)
         val state = vm.uiState.value
         assertEquals(ToolConfirmPolicy.AUTO_ALLOW, state.confirmPolicy)
         val resolved = state.toolConfirm as ToolConfirmState.Resolved
@@ -240,22 +240,30 @@ class TerminalViewModelTest {
     }
 
     @Test
-    fun rememberDenyStoresSessionPolicyEvenWithoutPending() {
+    fun disableAutoAllowRestoresAskingWithoutFabricatingDecisions() {
         val vm = TerminalViewModel()
-        vm.rememberToolDecision(allowed = false)
-        assertEquals(ToolConfirmPolicy.AUTO_DENY, vm.uiState.value.confirmPolicy)
-        // 无挂起项时只记策略，不伪造一次确认结果。
+        // 未开启时关闭：状态无变化。
+        vm.rememberAutoAllow(enabled = false)
+        assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
         assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)
+        // 开启结算挂起；再关闭恢复逐次询问，且不伪造新决策。
+        vm.requestToolConfirmation("read(\".\")")
+        vm.rememberAutoAllow(enabled = true)
+        vm.rememberAutoAllow(enabled = false)
+        val state = vm.uiState.value
+        assertEquals(ToolConfirmPolicy.ASK, state.confirmPolicy)
+        val resolved = state.toolConfirm as ToolConfirmState.Resolved
+        assertTrue(resolved.allowed)
     }
 
     @Test
     fun sessionMemoryResetsOnClearScreenAndOnExit() {
         val vm = TerminalViewModel()
-        vm.rememberToolDecision(allowed = true)
+        vm.rememberAutoAllow(enabled = true)
         vm.resetSession()
         assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
 
-        vm.rememberToolDecision(allowed = false)
+        vm.rememberAutoAllow(enabled = true)
         vm.resetToolConfirmPolicy()
         assertEquals(ToolConfirmPolicy.ASK, vm.uiState.value.confirmPolicy)
         assertEquals(ToolConfirmState.Idle, vm.uiState.value.toolConfirm)

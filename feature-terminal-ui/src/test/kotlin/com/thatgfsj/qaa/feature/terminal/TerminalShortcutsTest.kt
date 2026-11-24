@@ -78,7 +78,7 @@ class TerminalShortcutsTest {
             TerminalShortcut.CONFIRM_ALLOW.alternates,
         )
         assertEquals(
-            listOf(ShortcutAlternate(TerminalShortcutAction.RememberDeny, "本会话自动拒绝")),
+            listOf(ShortcutAlternate(TerminalShortcutAction.DisableAutoAllow, "关闭自动放行")),
             TerminalShortcut.CONFIRM_DENY.alternates,
         )
     }
@@ -102,7 +102,6 @@ class TerminalShortcutsTest {
     fun confirmScopeLabelShowsSessionMemory() {
         assertEquals("确认", confirmScopeLabel(ToolConfirmPolicy.ASK))
         assertEquals("确认·自动放行", confirmScopeLabel(ToolConfirmPolicy.AUTO_ALLOW))
-        assertEquals("确认·自动拒绝", confirmScopeLabel(ToolConfirmPolicy.AUTO_DENY))
     }
 
     @Test

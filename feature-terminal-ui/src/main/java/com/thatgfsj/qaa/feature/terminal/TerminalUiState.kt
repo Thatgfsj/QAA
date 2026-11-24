@@ -79,27 +79,19 @@ fun ToolConfirmState.Resolved.resultText(): String =
     "[TOOL] $description -> ${if (allowed) "Allow" else "Deny"}"
 
 /**
- * 会话级确认策略（#93）：yes / no 长按切到自动决策，清屏或退出会话恢复逐次询问。
+ * 会话级确认策略（#93）：yes 长按切到自动放行；no 长按、清屏或退出会话恢复逐次询问。
  *
- * [autoDecision] 是唯一判定入口：确认门据此跳过挂起，直接放行 / 拒绝；
+ * [autoDecision] 是唯一判定入口：确认门据此跳过挂起，直接放行；
  * 策略本身随会话走，不落盘，进程重启即回到 ASK。
  */
 enum class ToolConfirmPolicy(val displayLabel: String) {
     ASK("询问"),
-    AUTO_ALLOW("自动放行"),
-    AUTO_DENY("自动拒绝");
+    AUTO_ALLOW("自动放行");
 
     /** 自动决策结果：ASK 返回 null（必须人工确认）。 */
     fun autoDecision(): Boolean? = when (this) {
         ASK -> null
         AUTO_ALLOW -> true
-        AUTO_DENY -> false
-    }
-
-    companion object {
-        /** 由一次人工决策升格为会话级记忆。 */
-        fun forDecision(allowed: Boolean): ToolConfirmPolicy =
-            if (allowed) AUTO_ALLOW else AUTO_DENY
     }
 }
 

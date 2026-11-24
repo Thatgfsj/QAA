@@ -421,7 +421,7 @@ class TerminalShellControllerTest {
         val viewModel = TerminalViewModel()
         val shell = controller(viewModel, agent = FakeTerminalAgentPort(), scope = this)
         shell.onInput("chat 0")
-        viewModel.rememberToolDecision(allowed = true)
+        viewModel.rememberAutoAllow(enabled = true)
         assertEquals(ToolConfirmPolicy.AUTO_ALLOW, viewModel.uiState.value.confirmPolicy)
 
         shell.onInput("/exit")

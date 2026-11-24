@@ -8,7 +8,7 @@ package com.thatgfsj.qaa.feature.terminal
  * - 键盘：收起 / 展开软键盘（Termux KEYBOARD 同款语义）。
  *
  * 长按弹次选（#93，Termux popup 风格）：↑ = clear 清屏、↓ = 跳到最早历史、
- * yes = 本会话自动放行、no = 本会话自动拒绝；键盘键无次选。
+ * yes = 本会话自动放行、no = 关闭自动放行（恢复逐次询问）；键盘键无次选。
  *
  * 纯 Kotlin：映射可在 JVM 单测中直接断言，不依赖 Compose / Android。
  */
@@ -27,7 +27,7 @@ enum class TerminalShortcut(val label: String) {
             CONFIRM_ALLOW ->
                 listOf(ShortcutAlternate(TerminalShortcutAction.RememberAllow, "本会话自动放行"))
             CONFIRM_DENY ->
-                listOf(ShortcutAlternate(TerminalShortcutAction.RememberDeny, "本会话自动拒绝"))
+                listOf(ShortcutAlternate(TerminalShortcutAction.DisableAutoAllow, "关闭自动放行"))
             KEYBOARD -> emptyList()
         }
 
@@ -52,8 +52,8 @@ enum class TerminalShortcut(val label: String) {
         /** yes 长按后的中文提示（会话级记忆生效）。 */
         const val AUTO_ALLOW_NOTICE = "本会话后续确认将自动放行；清屏或退出会话后恢复逐次询问。"
 
-        /** no 长按后的中文提示（会话级记忆生效）。 */
-        const val AUTO_DENY_NOTICE = "本会话后续确认将自动拒绝；清屏或退出会话后恢复逐次询问。"
+        /** no 长按后的中文提示（关闭会话级自动放行）。 */
+        const val AUTO_ALLOW_OFF_NOTICE = "已关闭本会话自动放行，后续确认恢复逐次询问。"
 
         /** 按钮展示顺序：历史两键、确认两键，最后是软键盘开关。 */
         val ordered: List<TerminalShortcut> = listOf(
@@ -82,8 +82,8 @@ sealed interface TerminalShortcutAction {
     /** yes 长按：记住本会话自动放行，并结算当前挂起项（若有）。 */
     data object RememberAllow : TerminalShortcutAction
 
-    /** no 长按：记住本会话自动拒绝，并结算当前挂起项（若有）。 */
-    data object RememberDeny : TerminalShortcutAction
+    /** no 长按：关闭本会话自动放行（恢复逐次询问；挂起项保持待人工决策）。 */
+    data object DisableAutoAllow : TerminalShortcutAction
 
     /** 键盘键：收起 / 展开软键盘。 */
     data object ToggleKeyboard : TerminalShortcutAction
@@ -94,13 +94,12 @@ sealed interface TerminalShortcutAction {
 data class ShortcutAlternate(val action: TerminalShortcutAction, val label: String)
 
 /**
- * 确认分组说明（底部栏 yes / no 旁的标签）：会话级自动记忆生效时就地显示当前策略，
- * 避免自动放行 / 拒绝在没有可见提示的情况下运行（#93）。
+ * 确认分组说明（底部栏 yes / no 旁的标签）：会话级自动放行生效时就地显示当前策略，
+ * 避免自动放行在没有可见提示的情况下运行（#93）。
  */
 fun confirmScopeLabel(policy: ToolConfirmPolicy): String = when (policy) {
     ToolConfirmPolicy.ASK -> "确认"
     ToolConfirmPolicy.AUTO_ALLOW -> "确认·自动放行"
-    ToolConfirmPolicy.AUTO_DENY -> "确认·自动拒绝"
 }
 
 /**

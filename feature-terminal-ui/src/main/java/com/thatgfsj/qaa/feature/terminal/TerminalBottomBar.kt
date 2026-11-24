@@ -59,7 +59,7 @@ fun TerminalBottomBar(
     onToolAllow: () -> Unit = {},
     onToolDeny: () -> Unit = {},
     onClearScreen: () -> Unit = {},
-    onRememberConfirm: (Boolean) -> Unit = {},
+    onAutoAllowMode: (Boolean) -> Unit = {},
     onNotice: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -103,12 +103,12 @@ fun TerminalBottomBar(
             TerminalShortcutAction.AllowTool -> onToolAllow()
             TerminalShortcutAction.DenyTool -> onToolDeny()
             TerminalShortcutAction.RememberAllow -> {
-                onRememberConfirm(true)
+                onAutoAllowMode(true)
                 onNotice(TerminalShortcut.AUTO_ALLOW_NOTICE)
             }
-            TerminalShortcutAction.RememberDeny -> {
-                onRememberConfirm(false)
-                onNotice(TerminalShortcut.AUTO_DENY_NOTICE)
+            TerminalShortcutAction.DisableAutoAllow -> {
+                onAutoAllowMode(false)
+                onNotice(TerminalShortcut.AUTO_ALLOW_OFF_NOTICE)
             }
             TerminalShortcutAction.ToggleKeyboard -> toggleKeyboard()
             is TerminalShortcutAction.Notice -> onNotice(action.text)
@@ -230,7 +230,6 @@ private fun ShortcutRow(
 private fun ToolConfirmPolicy.color() = when (this) {
     ToolConfirmPolicy.ASK -> TerminalColors.HintText
     ToolConfirmPolicy.AUTO_ALLOW -> TerminalColors.AiPrefix
-    ToolConfirmPolicy.AUTO_DENY -> TerminalColors.DenyText
 }
 
 /** 终端风按钮：直角描边 + 等宽字 + Material 按下反馈；有次选时接收长按。 */

@@ -44,10 +44,17 @@ class TerminalUiGateTest {
 
         fun deny() = resolve(allowed = false)
 
-        /** 模拟 yes / no 长按：写入会话级策略。 */
-        fun remember(allowed: Boolean) {
+        /** 模拟 yes 长按：写入会话级自动放行策略。 */
+        fun rememberAutoAllow() {
             mutableState.value = mutableState.value.copy(
-                confirmPolicy = ToolConfirmPolicy.forDecision(allowed),
+                confirmPolicy = ToolConfirmPolicy.AUTO_ALLOW,
+            )
+        }
+
+        /** 模拟 no 长按：关闭自动放行，恢复逐次询问。 */
+        fun disableAutoAllow() {
+            mutableState.value = mutableState.value.copy(
+                confirmPolicy = ToolConfirmPolicy.ASK,
             )
         }
 
@@ -133,7 +140,7 @@ class TerminalUiGateTest {
     @Test
     fun 会话级自动放行不挂起并上报策略() = runTest {
         val host = FakeHost()
-        host.remember(allowed = true)
+        host.rememberAutoAllow()
         var reported: Pair<String, ToolConfirmPolicy>? = null
         val gate = TerminalUiGate(host) { description, policy -> reported = description to policy }
 
@@ -145,14 +152,17 @@ class TerminalUiGateTest {
     }
 
     @Test
-    fun 会话级自动拒绝不挂起并上报策略() = runTest {
+    fun 关闭自动放行后确认门恢复挂起询问() = runTest {
         val host = FakeHost()
-        host.remember(allowed = false)
-        var reported: Pair<String, ToolConfirmPolicy>? = null
-        val gate = TerminalUiGate(host) { description, policy -> reported = description to policy }
+        host.rememberAutoAllow()
+        val gate = TerminalUiGate(host)
+        assertEquals(ConfirmationDecision.ALLOW, gate.awaitConfirmation(writeCall))
 
-        assertEquals(ConfirmationDecision.DENY, gate.awaitConfirmation(writeCall))
-        assertEquals(ToolConfirmState.Idle, host.uiState.value.toolConfirm)
-        assertEquals(ToolConfirmPolicy.AUTO_DENY, reported!!.second)
+        host.disableAutoAllow()
+        val decision = async { gate.awaitConfirmation(writeCall) }
+        runCurrent()
+        assertTrue(host.uiState.value.toolConfirm is ToolConfirmState.Pending)
+        host.deny()
+        assertEquals(ConfirmationDecision.DENY, decision.await())
     }
 }
