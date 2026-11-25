@@ -25,6 +25,8 @@ data class CatalogEntry(
     val sizeBytes: Long?,
     val source: ModelSource,
     val path: String?,
+    /** 兼容性结论（#102）：清单展示「不受支持」后缀；头不可读按未知档位放行。 */
+    val compatibility: ModelCompatibility? = null,
 )
 
 /** 持久清单条目（命名规则推不出的展示名与来源）；[key] 为 SDK 模型名或文件名。 */
@@ -122,6 +124,7 @@ class ModelCatalog(
                 sizeBytes = installed.sizeBytes,
                 source = meta?.source ?: sourceOf(installed.modelName),
                 path = installed.path,
+                compatibility = ModelCompatibilityGate.assessFile(installed.path?.let(::File)),
             )
         }
         modelFiles(modelsDir).forEach { file ->
@@ -137,6 +140,7 @@ class ModelCatalog(
                 sizeBytes = file.length(),
                 source = meta?.source ?: ModelSource.IMPORT,
                 path = file.absolutePath,
+                compatibility = ModelCompatibilityGate.assessFile(file),
             )
         }
         // 内置冒烟模型由排序固定排首位并取 0 号，其余按展示名 / 量化 / 路径稳定排序后从 1 起连续编号。

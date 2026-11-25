@@ -5,7 +5,10 @@ import com.thatgfsj.qaa.core.harness.CompactionTrigger
 import com.thatgfsj.qaa.core.harness.SkipReason
 import com.thatgfsj.qaa.core.inference.CatalogEntry
 import com.thatgfsj.qaa.core.inference.ComputeBackend
+import com.thatgfsj.qaa.core.inference.ModelCompatibility
+import com.thatgfsj.qaa.core.inference.ModelCompatibilityGate
 import com.thatgfsj.qaa.core.inference.ModelPullEvent
+import java.io.File
 import com.thatgfsj.qaa.feature.terminal.BackendRequest
 import com.thatgfsj.qaa.feature.terminal.LocalModelEntry
 import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
@@ -17,7 +20,7 @@ import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
  * 全部为纯函数，不持有运行时状态。
  */
 
-/** 模型清单条目 → 终端展示条目（序号与量化对齐 UI 模型）。 */
+/** 模型清单条目 → 终端展示条目（序号与量化对齐 UI 模型；#102 追加兼容性标注）。 */
 internal fun catalogToLocalEntries(entries: List<CatalogEntry>): List<LocalModelEntry> =
     entries.map {
         LocalModelEntry(
@@ -26,8 +29,13 @@ internal fun catalogToLocalEntries(entries: List<CatalogEntry>): List<LocalModel
             quantization = it.quantization ?: "未知",
             sizeBytes = it.sizeBytes,
             path = it.path,
+            note = compatibilityOf(it).displayNote,
         )
     }
+
+/** 清单条目的兼容性结论：清单已评估则复用，否则按文件头补评（不可读 → 未知档位放行）。 */
+internal fun compatibilityOf(entry: CatalogEntry): ModelCompatibility =
+    entry.compatibility ?: ModelCompatibilityGate.assessFile(entry.path?.let(::File))
 
 /** 拉取事件 → 终端投影。 */
 internal fun ModelPullEvent.toTerminalEvent(): TerminalPullEvent = when (this) {

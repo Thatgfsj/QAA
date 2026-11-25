@@ -53,7 +53,8 @@ class ModelImporter(
      * 把 [source] 中的 [name] 复制进模型目录并登记。
      *
      * @throws IllegalArgumentException 文件名非法（非 .gguf、含路径分隔符或 `..`）
-     * @throws IOException 目录创建失败、来源不可读、复制中断或大小校验失败
+     * @throws IOException 目录创建失败、来源不可读、复制中断、大小校验失败，或量化档位
+     *   不受支持（#102：非 Q4_0 拒绝导入并清理临时文件）
      */
     suspend fun importModel(source: ImportSource, name: String): ImportedModel =
         withContext(ioDispatcher) {
@@ -99,6 +100,12 @@ class ModelImporter(
                 )
             }
             if (copied <= 0L) throw IOException("导入的模型文件为空：" + name)
+            // #102 兼容门禁：先验头再落位，避免把不受支持的档位登记进清单。
+            ModelCompatibilityGate.rejectionMessage(
+                action = ModelCompatibilityGate.ModelAction.IMPORT,
+                modelLabel = displayNameOf(name) + "（" + name + "）",
+                compatibility = ModelCompatibilityGate.assessFile(tmp),
+            )?.let { throw IOException(it) }
             if (target.exists() && !target.delete()) {
                 throw IOException("无法覆盖已有模型文件：" + target.absolutePath)
             }

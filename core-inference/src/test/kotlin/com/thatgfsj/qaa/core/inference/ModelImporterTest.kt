@@ -76,6 +76,41 @@ class ModelImporterTest {
         assertEquals(64L, entries[1].sizeBytes)
         assertEquals(File(dir, "Foo-Q8_0.gguf").absolutePath, entries[1].path)
     }
+
+    @Test
+    fun 不受支持的量化档位_拒绝导入且不落目标也不登记(@TempDir dir: File) = runTest {
+        val catalog = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined)
+        val content = GgufFixture.build(
+            fileType = 15L,
+            tensors = listOf(
+                GgufFixture.matmul("blk.0.attn_q.weight", GgufQuantization.Q4_K),
+                GgufFixture.matmul("blk.0.ffn_down.weight", GgufQuantization.Q6_K),
+            ),
+        )
+        val error = runCatching {
+            ModelImporter(dir, catalog, Dispatchers.Unconfined)
+                .importModel(FakeImportSource(mapOf("Qwen3-4B-Q4_K_M.gguf" to content)), "Qwen3-4B-Q4_K_M.gguf")
+        }.exceptionOrNull()
+        assertTrue(error is IOException, "应为 IOException，实际：" + error)
+        val message = error?.message.orEmpty()
+        assertTrue(message.contains("不受支持"), "文案应说明不受支持：" + message)
+        assertTrue(message.contains("Q4_0"), "文案应给出改用 Q4_0 的建议：" + message)
+        assertFalse(File(dir, "Qwen3-4B-Q4_K_M.gguf").exists())
+        assertFalse(File(dir, "Qwen3-4B-Q4_K_M.gguf.tmp").exists())
+        assertEquals(1, catalog.list().size, "被拒文件不得登记清单")
+    }
+
+    @Test
+    fun 受支持的Q4_0文件头_放行导入(@TempDir dir: File) = runTest {
+        val content = GgufFixture.build(
+            fileType = 2L,
+            tensors = listOf(GgufFixture.matmul("blk.0.attn_q.weight", GgufQuantization.Q4_0)),
+        )
+        val imported = ModelImporter(dir, null, Dispatchers.Unconfined)
+            .importModel(FakeImportSource(mapOf("Ok-Q4_0.gguf" to content)), "Ok-Q4_0.gguf")
+        assertEquals("Q4_0", imported.quantization)
+        assertArrayEquals(content, imported.file.readBytes())
+    }
 }
 
 private class FakeImportSource(

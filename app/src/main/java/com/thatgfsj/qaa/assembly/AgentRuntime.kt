@@ -38,6 +38,8 @@ import com.thatgfsj.qaa.core.inference.LlmEnginePort
 import com.thatgfsj.qaa.core.inference.LlmLoadConfig
 import com.thatgfsj.qaa.core.inference.MemoryProbe
 import com.thatgfsj.qaa.core.inference.ModelCatalog
+import com.thatgfsj.qaa.core.inference.ModelCompatibility
+import com.thatgfsj.qaa.core.inference.ModelCompatibilityGate
 import com.thatgfsj.qaa.core.inference.ModelDeleteResult
 import com.thatgfsj.qaa.core.inference.ModelDeleter
 import com.thatgfsj.qaa.core.inference.ModelMemoryCoordinator
@@ -339,6 +341,13 @@ class AgentRuntime private constructor(
         val entry = catalog.resolveByName(token)
             ?: return "未找到本地模型：$token。输入 model 查看清单（名称或序号，内置模型为 0 号）。"
         val path = entry.path ?: return "模型文件缺失：${entry.name}；请重新下载或导入。"
+        // #102 载入门禁：不受支持档位直接拒绝，避免进入原生加载后乱码 / 崩溃。
+        val compatibility = entry.compatibility ?: ModelCompatibilityGate.assessFile(File(path))
+        ModelCompatibilityGate.rejectionMessage(
+            action = ModelCompatibilityGate.ModelAction.LOAD,
+            modelLabel = entry.name + "（" + (entry.quantization ?: "未知量化") + "）",
+            compatibility = compatibility,
+        )?.let { return it }
         if (engine.isLoaded.value &&
             loadedModelSource == path &&
             loadedContextTokens == contextLengthSetting
@@ -680,6 +689,7 @@ class AgentRuntime private constructor(
                 ModelSource.PULL -> "Hub 下载"
                 ModelSource.IMPORT -> "本地导入"
             },
+            compatibilityNote = compatibilityOf(entry).displayNote,
         )
     }
 

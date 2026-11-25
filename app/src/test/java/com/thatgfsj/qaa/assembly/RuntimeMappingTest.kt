@@ -7,6 +7,7 @@ import com.thatgfsj.qaa.core.harness.ContextWindow
 import com.thatgfsj.qaa.core.harness.SkipReason
 import com.thatgfsj.qaa.core.inference.CatalogEntry
 import com.thatgfsj.qaa.core.inference.ComputeBackend
+import com.thatgfsj.qaa.core.inference.ModelCompatibilityGate
 import com.thatgfsj.qaa.core.inference.ModelPullEvent
 import com.thatgfsj.qaa.core.inference.ModelSource
 import com.thatgfsj.qaa.feature.terminal.BackendRequest
@@ -36,13 +37,27 @@ class RuntimeMappingTest {
     @Test
     fun 清单条目映射为终端条目_量化缺省为未知() {
         val entries = listOf(
-            CatalogEntry(1, "Supra2.5-Pro-Instruct", "Q4_0", 40L, ModelSource.BUILT_IN, "/m/a.gguf"),
+            CatalogEntry(
+                1, "Supra2.5-Pro-Instruct", "Q4_0", 40L, ModelSource.BUILT_IN, "/m/a.gguf",
+                compatibility = ModelCompatibilityGate.assessFileName("Supra2.5-Pro-Instruct-Q4_0.gguf"),
+            ),
             CatalogEntry(2, "Qwen3-4B", null, null, ModelSource.IMPORT, null),
         )
         assertEquals(
             listOf(
-                LocalModelEntry(1, "Supra2.5-Pro-Instruct", "Q4_0", 40L, "/m/a.gguf"),
-                LocalModelEntry(2, "Qwen3-4B", "未知"),
+                LocalModelEntry(
+                    index = 1,
+                    name = "Supra2.5-Pro-Instruct",
+                    quantization = "Q4_0",
+                    sizeBytes = 40L,
+                    path = "/m/a.gguf",
+                ),
+                LocalModelEntry(
+                    index = 2,
+                    name = "Qwen3-4B",
+                    quantization = "未知",
+                    note = ModelCompatibilityGate.UNKNOWN_NOTE,
+                ),
             ),
             catalogToLocalEntries(entries),
         )

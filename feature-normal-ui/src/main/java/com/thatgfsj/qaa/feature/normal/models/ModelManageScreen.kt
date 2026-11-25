@@ -253,6 +253,14 @@ private fun ModelCard(
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(text = "体积：" + formatSize(model.sizeBytes), style = MaterialTheme.typography.bodySmall)
+            // #102 兼容门禁：不受支持 / 未知档位在此提示，载入按钮保持可点由拦截文案兜底。
+            model.compatibilityNote?.let { note ->
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onActivate, enabled = !busy) {
