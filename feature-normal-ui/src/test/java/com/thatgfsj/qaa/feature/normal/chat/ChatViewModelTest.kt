@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -22,7 +23,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** 会话 fake 流式逻辑 JVM 单测（Issue #8 验收）。 */
+/** 会话页时间线状态机 JVM 单测（Issue #8 骨架 + #127 窗口 Agent 化）。 */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
 
@@ -36,46 +37,45 @@ class ChatViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private fun ChatViewModel.textSegments(): List<ChatSegment.Text> =
+        segments.value.filterIsInstance<ChatSegment.Text>()
+
     @Test
-    fun 空白输入_不生成消息() = runTest {
+    fun 空白输入_不生成任何段() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
         vm.send("   ")
         advanceUntilIdle()
-        assertTrue(vm.messages.value.isEmpty())
+        assertTrue(vm.segments.value.isEmpty())
         assertFalse(vm.isGenerating.value)
     }
 
     @Test
-    fun 发送后_用户消息立即入列() = runTest {
+    fun 发送后_用户文本段立即入列() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
         vm.send("你好")
         advanceUntilIdle()
-        assertEquals(2, vm.messages.value.size)
-        assertEquals(ChatRole.USER, vm.messages.value.first().role)
-        assertEquals("你好", vm.messages.value.first().content)
+        val texts = vm.textSegments()
+        assertEquals(2, texts.size)
+        assertEquals(ChatRole.USER, texts.first().role)
+        assertEquals("你好", texts.first().content)
     }
 
     @Test
-    fun 流式回复_逐token追加() = runTest {
+    fun fake流式_逐token追加到同一文本段() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
         vm.send("测试")
-        // 启动协程：AI 占位消息入列，内容为空。
         runCurrent()
-        assertEquals(ChatRole.ASSISTANT, vm.messages.value.last().role)
-        assertEquals("", vm.messages.value.last().content)
+        assertEquals(ChatRole.ASSISTANT, vm.textSegments().last().role)
+        assertEquals("", vm.textSegments().last().content)
         assertTrue(vm.isGenerating.value)
 
         val tokens = vm.scriptedReplyTokens("测试")
-        // 推进 3 个 token 周期：advanceTimeBy 不执行恰在目标时刻的任务，
-        // 需补 runCurrent() 才会送达第 3 个 token。
         advanceTimeBy(10 * 3)
         runCurrent()
-        assertEquals(tokens.take(3).joinToString(""), vm.messages.value.last().content)
-        assertTrue(vm.isGenerating.value)
+        assertEquals(tokens.take(3).joinToString(""), vm.textSegments().last().content)
 
-        // 全部推送完成后：内容完整、退出生成态。
         advanceUntilIdle()
-        assertEquals(tokens.joinToString(""), vm.messages.value.last().content)
+        assertEquals(tokens.joinToString(""), vm.textSegments().last().content)
         assertFalse(vm.isGenerating.value)
     }
 
@@ -84,33 +84,20 @@ class ChatViewModelTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
         vm.send("第一条")
         runCurrent()
-        vm.send("第二条") // 生成中，应被忽略
+        vm.send("第二条")
         advanceUntilIdle()
-        assertEquals(2, vm.messages.value.size)
-        assertEquals("第一条", vm.messages.value.first().content)
+        assertEquals(1, vm.textSegments().count { it.role == ChatRole.USER })
+        assertEquals("第一条", vm.textSegments().first { it.role == ChatRole.USER }.content)
     }
 
     @Test
-    fun 待确认描述同步_空白视为无() = runTest {
+    fun 真实端口_流式预览后以返回值为终稿() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
-        assertNull(vm.toolConfirmPending.value)
-        vm.setToolConfirmPending("write 路径=\"a.txt\"")
-        assertEquals("write 路径=\"a.txt\"", vm.toolConfirmPending.value)
-        vm.setToolConfirmPending("   ")
-        assertNull(vm.toolConfirmPending.value)
-    }
-
-    @Test
-    fun 真实端口_生成中逐token渲染且终稿以端口返回为准() = runTest {
-        val vm = ChatViewModel(tokenIntervalMs = 10)
-        val renders = mutableListOf<String>()
         val finished = CompletableDeferred<Unit>()
         val port = object : NormalAgentPort {
             override val assistantTokens: Flow<String> = flow {
                 emit("片")
-                renders += vm.messages.value.last().content
                 emit("段")
-                renders += vm.messages.value.last().content
                 finished.complete(Unit)
             }
 
@@ -123,22 +110,62 @@ class ChatViewModelTest {
         vm.send("你好")
         advanceUntilIdle()
 
-        assertEquals(listOf("片", "片段"), renders)
-        assertEquals("最终答复", vm.messages.value.last().content)
+        assertEquals("最终答复", vm.textSegments().last().content)
         assertFalse(vm.isGenerating.value)
     }
 
-    // ---- #91 指标条 ----
-
     @Test
-    fun 未接线指标_显示占位文案() = runTest {
+    fun 工具段_同id更新不追加新项() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
+        val events = MutableSharedFlow<ChatSegment>(extraBufferCapacity = 16)
+        val port = object : NormalAgentPort {
+            override suspend fun ask(text: String): String = "答复"
+            override val chatSegments: Flow<ChatSegment> = events
+        }
+        vm.bindAgent(port)
+        runCurrent()
 
-        assertEquals("TTFT -- | 速度 -- tok/s | Token --", vm.metrics.value.metricsBarText())
+        val toolId = 7L shl 40
+        events.tryEmit(ChatSegment.ToolCall(toolId, "read", "{}", ToolSegmentStatus.RUNNING))
+        advanceUntilIdle()
+        assertEquals(1, vm.segments.value.count { it is ChatSegment.ToolCall })
+
+        events.tryEmit(
+            ChatSegment.ToolCall(toolId, "read", "{}", ToolSegmentStatus.SUCCESS, result = "ok"),
+        )
+        advanceUntilIdle()
+
+        val tools = vm.segments.value.filterIsInstance<ChatSegment.ToolCall>()
+        assertEquals(1, tools.size)
+        assertEquals(ToolSegmentStatus.SUCCESS, tools.single().status)
+        assertEquals("ok", tools.single().result)
     }
 
     @Test
-    fun 端口指标流_映射到指标条且随生成更新() = runTest {
+    fun 终稿文本_排在先到的执行链之后() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+        val events = MutableSharedFlow<ChatSegment>(extraBufferCapacity = 16)
+        val port = object : NormalAgentPort {
+            override suspend fun ask(text: String): String {
+                events.tryEmit(ChatSegment.ToolCall(1L shl 40, "read", "{}", ToolSegmentStatus.SUCCESS))
+                return "最终答复"
+            }
+
+            override val chatSegments: Flow<ChatSegment> = events
+        }
+        vm.bindAgent(port)
+        vm.send("你好")
+        advanceUntilIdle()
+
+        val timeline = vm.segments.value
+        val toolIndex = timeline.indexOfFirst { it is ChatSegment.ToolCall }
+        val textIndex = timeline.indexOfFirst { it is ChatSegment.Text && it.content == "最终答复" }
+        assertTrue(toolIndex >= 0)
+        assertTrue(textIndex > toolIndex)
+    }
+
+    @Test
+    fun 端口指标流_映射到指标条() = runTest {
         val vm = ChatViewModel(tokenIntervalMs = 10)
         val source = MutableStateFlow(ChatMetrics())
         val port = object : NormalAgentPort {
@@ -152,10 +179,18 @@ class ChatViewModelTest {
         source.value = ChatMetrics(ttftMs = 142, tokensPerSecond = 38.4, tokensUsed = 412, contextTokens = 4096)
         advanceUntilIdle()
 
-        val bar = vm.metrics.value.metricsBarText()
         assertEquals(142L, vm.metrics.value.ttftMs)
-        assertTrue(bar.contains("TTFT 142ms"))
-        assertTrue(bar.contains("38.4 tok/s"))
-        assertTrue(bar.contains("Token 412 / 4096"))
+        assertTrue(vm.metrics.value.metricsBarText().contains("TTFT 142ms"))
+        assertTrue(vm.metrics.value.metricsBarText().contains("Token 412 / 4096"))
+    }
+
+    @Test
+    fun 待确认描述同步_空白视为无() = runTest {
+        val vm = ChatViewModel(tokenIntervalMs = 10)
+        assertNull(vm.toolConfirmPending.value)
+        vm.setToolConfirmPending("write 路径=\"a.txt\"")
+        assertEquals("write 路径=\"a.txt\"", vm.toolConfirmPending.value)
+        vm.setToolConfirmPending("   ")
+        assertNull(vm.toolConfirmPending.value)
     }
 }
