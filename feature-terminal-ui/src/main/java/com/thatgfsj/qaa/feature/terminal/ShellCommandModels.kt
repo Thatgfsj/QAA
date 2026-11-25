@@ -42,6 +42,7 @@ enum class BackendRequest(val command: String, val displayName: String) {
  * 本地模型条目：[index] 为清单序号——内置冒烟模型固定 0，下载 / 导入从 1 起。
  *
  * [sizeBytes] / [path] 供 `model delete` 的二次确认回显（体积与落点）；未接线时为 null。
+ * [note] 为 #102 兼容性提示，不受支持 / 未知档位时追加在展示文本末尾。
  */
 data class LocalModelEntry(
     val index: Int,
@@ -49,8 +50,10 @@ data class LocalModelEntry(
     val quantization: String,
     val sizeBytes: Long? = null,
     val path: String? = null,
+    /** 兼容性提示（#102）：不受支持 / 未知档位时追加在展示文本末尾；null 无提示。 */
+    val note: String? = null,
 ) {
-    val displayText: String get() = "$name($quantization)"
+    val displayText: String get() = "$name($quantization)" + (note?.let { " " + it } ?: "")
 }
 
 /** 本地模型目录：Phase 1 仅内置冒烟模型（docs/ARCHITECTURE.md 第 1 节），固定 0 号。 */

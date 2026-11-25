@@ -9,12 +9,14 @@ import com.geniex.sdk.bean.HubSource
 import com.geniex.sdk.bean.ModelPaths
 import com.geniex.sdk.bean.ModelPullInput
 import com.geniex.sdk.bean.ModelType
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 /** ModelPullClient 单测：URL 归一化 + 事件投影 + 取消/断点续传语义。 */
 class ModelPullClientTest {
@@ -152,6 +155,46 @@ class ModelPullClientTest {
         assertEquals(100L, resumed.bytes)
         assertEquals(1f, resumed.percent)
         assertEquals(2, gateway.calls)
+    }
+
+    @Test
+    fun 文件名带不受支持量化_下载前直接拒绝且不调引擎() = runTest {
+        val gateway = FakeGateway(events = listOf(SdkCompleted))
+        val target = ModelPullTarget(
+            input = "org/Qwen3-4B-GGUF",
+            hub = HubSource.HUGGINGFACE,
+            modelName = "org/Qwen3-4B-GGUF",
+            fileName = "Qwen3-4B-Q8_0.gguf",
+        )
+        val event = ModelPullClient(gateway, Dispatchers.Unconfined).pull(target).single()
+        assertTrue(event is ModelPullEvent.Failed, "应为 Failed，实际：" + event)
+        val failed = event as ModelPullEvent.Failed
+        assertEquals(GenieXPullErrorCodes.INVALID_INPUT, failed.code)
+        assertFalse(failed.resumable, "预检拒绝不可续传")
+        assertTrue(failed.message.contains("Q4_0"), "文案应给出改用 Q4_0 的建议：" + failed.message)
+        assertTrue(gateway.inputs.isEmpty(), "预检拒绝不应调用引擎")
+    }
+
+    @Test
+    fun 下载完成后重新校验文件头_不受支持则不发Completed(@TempDir dir: File) = runTest {
+        val file = File(dir, "downloaded.gguf")
+        // 下载文件名无法判定时，以张量直方图为准：K 系列 matmul 权重 → 拒绝 Completed。
+        file.writeBytes(
+            GgufFixture.build(
+                fileType = 15L,
+                tensors = listOf(
+                    GgufFixture.matmul("blk.0.attn_q.weight", GgufQuantization.Q4_K),
+                    GgufFixture.matmul("blk.0.ffn_down.weight", GgufQuantization.Q6_K),
+                ),
+            ),
+        )
+        val gateway = FakeGateway(events = listOf(SdkCompleted), paths = modelPaths(file.absolutePath))
+        val event = ModelPullClient(gateway, Dispatchers.Unconfined)
+            .pull("org/Qwen3-4B-GGUF").toList().single()
+        assertTrue(event is ModelPullEvent.Failed, "应为 Failed，实际：" + event)
+        val failed = event as ModelPullEvent.Failed
+        assertEquals(GenieXPullErrorCodes.INVALID_INPUT, failed.code)
+        assertFalse(failed.resumable)
     }
 }
 private fun modelPaths(path: String): ModelPaths = ModelPaths(

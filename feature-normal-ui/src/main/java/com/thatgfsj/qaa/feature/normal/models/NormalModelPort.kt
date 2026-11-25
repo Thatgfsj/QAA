@@ -46,6 +46,8 @@ data class NormalModelEntry(
     val quantization: String?,
     val sizeBytes: Long?,
     val sourceLabel: String,
+    /** 兼容性提示（#102）：不受支持档位给出中文说明；null 无需提示。 */
+    val compatibilityNote: String? = null,
 )
 
 /** 模型下载/清单端口。 */

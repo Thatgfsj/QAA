@@ -235,6 +235,7 @@ class ModelManageViewModel : ViewModel() {
         source = entry.sourceLabel,
         loaded = false,
         ordinal = entry.ordinal,
+        compatibilityNote = entry.compatibilityNote,
     )
 
     private fun defaultCatalog(): List<ModelInfo> = listOf(

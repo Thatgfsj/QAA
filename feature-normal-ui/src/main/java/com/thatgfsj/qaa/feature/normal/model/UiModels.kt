@@ -24,6 +24,8 @@ data class ModelInfo(
     val source: String,
     val loaded: Boolean,
     val ordinal: Int = 0,
+    /** 兼容性提示（#102）：不受支持 / 未知档位的中文说明；null 无需提示。 */
+    val compatibilityNote: String? = null,
 )
 
 /**

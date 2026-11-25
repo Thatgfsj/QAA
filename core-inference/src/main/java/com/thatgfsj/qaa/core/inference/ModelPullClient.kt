@@ -3,6 +3,7 @@ package com.thatgfsj.qaa.core.inference
 import com.geniex.sdk.ModelManagerWrapper
 import com.geniex.sdk.bean.HubSource
 import com.geniex.sdk.bean.ModelPullInput
+import java.io.File
 import java.net.URI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -78,6 +79,21 @@ class ModelPullClient(
 
     /** 按已解析目标拉取（调用方已选定 hub/precision 时使用）。 */
     fun pull(target: ModelPullTarget, hfToken: String? = null): Flow<ModelPullEvent> = flow {
+        // #102 下载前预检：文件名/仓库名带明确量化标记且不受支持时，直接拒绝，不浪费流量。
+        ModelCompatibilityGate.rejectionMessageForName(
+            fileName = target.fileName ?: target.modelName,
+            modelLabel = target.modelName,
+            action = ModelCompatibilityGate.ModelAction.PULL,
+        )?.let { rejection ->
+            emit(
+                ModelPullEvent.Failed(
+                    code = GenieXPullErrorCodes.INVALID_INPUT,
+                    message = rejection,
+                    resumable = false,
+                ),
+            )
+            return@flow
+        }
         val input = ModelPullInput(
             model_name = target.modelName,
             precision = target.precision,
@@ -89,8 +105,29 @@ class ModelPullClient(
                 gateway.pull(input).transform { event ->
                     when (event) {
                         is ModelManagerWrapper.PullEvent.Progress -> emit(event.toPullEvent())
-                        is ModelManagerWrapper.PullEvent.Completed ->
-                            emit(ModelPullEvent.Completed(target.modelName, resolvePath(target.modelName)))
+                        is ModelManagerWrapper.PullEvent.Completed -> {
+                            val resolvedPath = resolvePath(target.modelName)
+                            // #102 下载后按实际落盘文件复验：不受支持则不发 Completed，
+                            // 让上层无从登记（下载内容保留在 SDK 缓存，用户可换 Q4_0）。
+                            val rejection = resolvedPath?.let { path ->
+                                ModelCompatibilityGate.rejectionMessage(
+                                    action = ModelCompatibilityGate.ModelAction.PULL,
+                                    modelLabel = target.modelName,
+                                    compatibility = ModelCompatibilityGate.assessFile(File(path)),
+                                )
+                            }
+                            if (rejection != null) {
+                                emit(
+                                    ModelPullEvent.Failed(
+                                        code = GenieXPullErrorCodes.INVALID_INPUT,
+                                        message = rejection,
+                                        resumable = false,
+                                    ),
+                                )
+                            } else {
+                                emit(ModelPullEvent.Completed(target.modelName, resolvedPath))
+                            }
+                        }
                         is ModelManagerWrapper.PullEvent.Error -> emit(
                             ModelPullEvent.Failed(
                                 code = event.code,
