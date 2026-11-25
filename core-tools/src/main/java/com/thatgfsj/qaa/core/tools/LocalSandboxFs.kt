@@ -95,6 +95,23 @@ open class LocalSandboxFs(roots: List<SandboxRoot>) : SandboxFs {
         return replaced
     }
 
+    /** 当前授权根快照（顺序即路由优先级，首根为默认根）。 */
+    @Synchronized
+    fun roots(): List<SandboxRoot> = table.mounts.map { it.root }
+
+    /**
+     * 整体替换授权根表（Issue #126 工作区切换）：首根为默认根，[roots] 必须非空且 id 唯一。
+     *
+     * 与 [addRoot] 共用同一把锁：替换在单个快照内生效，解析不会看到新旧根混排。
+     * 调用方负责保留需要继续挂载的附加根（如 storage grant 的 ext 根）。
+     */
+    @Synchronized
+    fun replaceRoots(roots: List<SandboxRoot>) {
+        require(roots.isNotEmpty()) { "至少需要一个授权根" }
+        require(roots.map { it.id }.distinct().size == roots.size) { "授权根 id 重复" }
+        table = RootTable(roots.map(::mountOf))
+    }
+
     private fun mountOf(root: SandboxRoot): RootMount {
         validateRoot(root)
         return when (root) {
