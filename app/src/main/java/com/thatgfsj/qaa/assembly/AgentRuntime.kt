@@ -131,8 +131,14 @@ class AgentRuntime private constructor(
         backendProbe = LogcatBackendProbe(),
     )
     private val llmGateway = LlmGatewayAdapter(engine) { contextLengthSetting }
-    private val releaser = AssetModelReleaser(AndroidAssetSource(appContext), modelsDir)
-    private val catalog = ModelCatalog(modelsDir, DefaultGenieXModelGateway)
+    // #124：本版是否随包内置模型由 assets 实况决定；release 不再打包模型后，私有目录里的历史副本按普通模型列出。
+    private val assetSource = AndroidAssetSource(appContext)
+    private val releaser = AssetModelReleaser(assetSource, modelsDir)
+    private val catalog = ModelCatalog(
+        modelsDir,
+        DefaultGenieXModelGateway,
+        builtinNames = assetSource.listModels().toSet(),
+    )
 
     /** 模型删除链路（#111）：终端 model delete 与 Normal 模型页共用同一实现。 */
     private val deleter = ModelDeleter(modelsDir, catalog, DefaultGenieXModelGateway)

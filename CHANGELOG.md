@@ -2,6 +2,13 @@
 
 本文件记录面向用户的版本级变更；单次合入的明细见对应 Issue 与 Pull Request。
 
+## v0.1.6（发布瘦身 · 不再内置冒烟模型）
+
+- 发布包瘦身（#124）：Supra2.5-Pro-Instruct(Q4_0) 冒烟模型不再打包进 release APK——资产移到 `app/src/smoke/assets/models/` 且只挂 debug 变体，release 构建产物不含 `assets/models/`，安装包约少 43.5 MB；正式包不再「装完即有一个模型可跑」，需要时自行导入
+- 历史残留可清理（#124）：内置条目判定改由「本版 APK 实际内置的资产集合」决定——release 未内置时不再生成 0 号占位，私有目录里旧版本释放的同名副本按普通模型列出，`model delete <序号> --force` 可正常删除并释放空间
+- 删除保护口径同步（#124）：`ModelDeleter` 只对来源为 BUILT_IN 的条目拒绝删除，普通 0 号条目不再被误拦
+- 冒烟链路不变：先 `./scripts/fetch-smoke-model.sh` 再 `assembleDebug`，debug 包仍安装即离线运行
+
 ## v0.1.5（打磨五 · 发布）
 
 - 文档：GenieX 0.10 量化兼容性取证包（#97）——Q4_0 可用 / K 系全乱码的成对对照证据、乱码原文、GGUF 头与张量直方图、崩溃分类，并给出 #102 门禁「按张量角色判定」的实测依据

@@ -59,6 +59,25 @@ class ModelDeleterTest {
     }
 
     @Test
+    fun 不随包内置_残留副本可正常删除(@TempDir dir: File) = runTest {
+        // #124：APK 不再内置该模型时，私有目录里的历史副本不再是受保护条目，删除链路必须放行。
+        val leftover = writeGguf(dir, ModelCatalog.BUILT_IN_FILE_NAME, 64)
+        val catalog = ModelCatalog(
+            dir,
+            ioDispatcher = Dispatchers.Unconfined,
+            builtinNames = emptySet(),
+        )
+        val deleter = ModelDeleter(dir, catalog, ioDispatcher = Dispatchers.Unconfined)
+
+        val result = deleter.delete(0) as ModelDeleteResult.Deleted
+
+        assertEquals(ModelCatalog.BUILT_IN_NAME, result.name)
+        assertEquals(64L, result.freedBytes)
+        assertFalse(leftover.exists())
+        assertTrue(catalog.list().isEmpty())
+    }
+
+    @Test
     fun 未找到_序号与名称都返回NotFound(@TempDir dir: File) = runTest {
         val catalog = ModelCatalog(dir, ioDispatcher = Dispatchers.Unconfined)
         val deleter = ModelDeleter(dir, catalog, ioDispatcher = Dispatchers.Unconfined)

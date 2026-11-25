@@ -51,6 +51,12 @@ class ModelCatalog(
     private val modelsDir: File,
     private val gateway: GenieXModelGateway? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * 本版 APK 实际内置的模型文件名集合（#124）：由装配层按 `assets/models/` 实况传入。
+     * 空集合表示本版不再随包内置模型——目录里同名的历史残留副本按普通导入模型列出，可正常删除；
+     * 默认值保持旧的「内置冒烟模型」行为，便于单测与未接入资产源的宿主。
+     */
+    private val builtinNames: Set<String> = setOf(BUILT_IN_FILE_NAME),
 ) {
 
     private val manifest = ModelManifest(File(modelsDir, MANIFEST_FILE_NAME))
@@ -94,28 +100,33 @@ class ModelCatalog(
 
     private suspend fun buildEntries(): List<CatalogEntry> {
         val registered = manifest.read().associateBy { it.key }
-        val builtInFile = File(modelsDir, BUILT_IN_FILE_NAME)
-        val builtInExists = builtInFile.isFile
-        val entries = mutableListOf(
-            CatalogEntry(
+        // #124：只有本版 APK 真的内置了资产才生成 0 号条目；否则同名残留文件走普通模型路径（可删除）。
+        val builtinName = builtinNames.sorted().firstOrNull()
+        val builtInFile = builtinName?.let { File(modelsDir, it) }
+        val builtInExists = builtInFile?.isFile == true
+        val builtinShipped = builtInFile != null
+        val entries = mutableListOf<CatalogEntry>()
+        if (builtInFile != null) {
+            entries += CatalogEntry(
                 ordinal = 0,
-                name = BUILT_IN_NAME,
-                quantization = BUILT_IN_QUANTIZATION,
+                name = displayNameOf(builtInFile.name),
+                quantization = quantizationOf(builtInFile.name),
                 sizeBytes = if (builtInExists) builtInFile.length() else BUILT_IN_SIZE_BYTES,
                 source = ModelSource.BUILT_IN,
                 path = builtInFile.takeIf { builtInExists }?.absolutePath,
-            ),
-        )
+            )
+        }
         // #98：路径去重（同文件多来源）+ 身份去重（SDK 为同一模型生成的多个托管名 / 工作副本）。
         // 内置模型身份先占用，任何影子条目都会被拒绝，清单里内置模型始终只有 0 号一条。
         val seenPaths = mutableSetOf<String>()
-        val seenIdentities = mutableSetOf(identityOf(BUILT_IN_NAME, BUILT_IN_QUANTIZATION))
-        if (builtInExists) seenPaths += builtInFile.absolutePath
+        val seenIdentities = mutableSetOf<String>()
+        if (builtinShipped) seenIdentities += identityOf(BUILT_IN_NAME, BUILT_IN_QUANTIZATION)
+        if (builtInExists) seenPaths += builtInFile!!.absolutePath
         installedModels().forEach { installed ->
             val meta = registered[installed.modelName]
             val name = meta?.name ?: displayNameOf(installed.fileName ?: installed.modelName)
             val quantization = quantizationOf(installed.fileName) ?: quantizationOf(installed.modelName)
-            if (isBuiltInWorkingCopy(installed.fileName, name, quantization)) return@forEach
+            if (builtinShipped && isBuiltInWorkingCopy(installed.fileName, name, quantization)) return@forEach
             if (!claimUnique(name, quantization, installed.path, seenPaths, seenIdentities)) return@forEach
             entries += CatalogEntry(
                 ordinal = 0,
@@ -131,7 +142,7 @@ class ModelCatalog(
             val meta = registered[file.name]
             val name = meta?.name ?: displayNameOf(file.name)
             val quantization = quantizationOf(file.name)
-            if (isBuiltInWorkingCopy(file.name, name, quantization)) return@forEach
+            if (builtinShipped && isBuiltInWorkingCopy(file.name, name, quantization)) return@forEach
             if (!claimUnique(name, quantization, file.absolutePath, seenPaths, seenIdentities)) return@forEach
             entries += CatalogEntry(
                 ordinal = 0,
