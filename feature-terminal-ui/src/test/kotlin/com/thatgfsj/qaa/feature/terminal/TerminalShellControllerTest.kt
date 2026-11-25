@@ -42,6 +42,7 @@ class TerminalShellControllerTest {
         agent: TerminalAgentPort? = null,
         modelList: TerminalModelListPort? = null,
         modelPull: TerminalModelPullPort? = null,
+        workspaces: TerminalWorkspacePort? = null,
         onRequestModelImport: () -> Unit = {},
         onRequestStorageGrant: () -> Unit = {},
         scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
@@ -52,6 +53,7 @@ class TerminalShellControllerTest {
         agent = agent,
         modelList = modelList,
         modelPull = modelPull,
+        workspaces = workspaces,
         onRequestModelImport = onRequestModelImport,
         onRequestStorageGrant = onRequestStorageGrant,
         scope = scope,
@@ -376,6 +378,33 @@ class TerminalShellControllerTest {
         val listText = viewModel.uiState.value.entries.last().text
         assertFalse("清单仍含被删模型：$listText", listText.contains("Qwen3-4B"))
         assertTrue(listText.contains("0. Supra2.5-Pro-Instruct(Q4_0)"))
+    }
+
+    @Test
+    fun workspaceRequestsGoToPortAndRefreshSnapshot() = runTest {
+        val viewModel = TerminalViewModel()
+        val port = FakeTerminalAgentPort()
+        val workspacePort = FakeTerminalWorkspacePort()
+        val shell = controller(viewModel, agent = port, workspaces = workspacePort, scope = this)
+        advanceUntilIdle()
+
+        shell.onInput("/workspace use 1")
+        advanceUntilIdle()
+
+        assertEquals(listOf(WorkspaceRequest.Use("ws-1")), workspacePort.requests)
+        assertTrue(workspacePort.entriesCalls >= 2)
+
+        // 快照更新后概览跟随最新当前工作区。
+        workspacePort.setEntries(
+            FakeTerminalWorkspacePort.defaultWorkspaces().map { entry ->
+                if (entry.id == "ws-1") entry.copy(current = true) else entry.copy(current = false)
+            },
+        )
+        shell.refreshWorkspaces()
+        advanceUntilIdle()
+        shell.onInput("/workspace")
+        val text = viewModel.uiState.value.entries.joinToString("\n") { it.text }
+        assertTrue(text.contains("当前工作区：资料库"))
     }
 
     @Test

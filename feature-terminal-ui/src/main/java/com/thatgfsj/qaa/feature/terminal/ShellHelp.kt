@@ -39,6 +39,7 @@ private val HELP_ROWS = listOf(
     HelpRow("/logs [行数]", "全部", "导出应用内日志（默认 200 行）"),
     HelpRow("/ctx [token]", "全部", "查看 / 设置上下文长度"),
     HelpRow("/system [文本|reset]", "全部", "查看 / 设置系统提示词"),
+    HelpRow("/workspace", "全部", "工作区概览 / 管理（list/new/use/rename/rm）"),
 )
 
 /** 全中文命令表（命令、适用状态、说明三列）与输入约定提示。 */
@@ -58,6 +59,7 @@ internal fun shellHelpText(): String = buildString {
     appendLine("· /ctx 长度：建议 4096 / 8192 / 16384 / 32768，亦可自定义 1024~1048576（支持 20k / 64k / 1m）。")
     appendLine("· ≤8192 且模型已加载时 /ctx 自动重载生效，更大值需重新载入模型；长上下文可能因内存溢出闪退（进程级崩溃），建议先用小长度验证。")
     appendLine("· /system 无参查看系统提示词全文与来源；带文本整体替换，/system reset 恢复默认；提示词每轮组装，下一轮生效。")
+    appendLine("· /workspace 无参查看概览；list 列出全部；new <名称> 新建内置工作区；use <序号|id> 切换；rename <序号|id> <新名>；rm <序号|id> [--force]。")
     append("· 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。")
 }
 
@@ -76,6 +78,37 @@ internal fun localModelListText(models: List<LocalModelEntry>, current: Terminal
             append("当前模型：${current.displayText}。使用 chat <模型名|序号> 或 agent [模型名|序号] 进入会话。")
         }
     }
+
+/**
+ * 工作区清单文案（/workspace list）：序号、名称、来源、会话数、当前标记。
+ * 空清单只可能是快照尚未接线，给出可操作提示。
+ */
+internal fun workspaceListText(entries: List<WorkspaceEntry>): String =
+    if (entries.isEmpty()) {
+        "工作区清单为空：请执行 /workspace new <名称> 新建内置工作区。"
+    } else {
+        buildString {
+            appendLine("工作区清单（共 ${entries.size} 个）：")
+            entries.forEach { entry ->
+                appendLine(
+                    "  ${entry.index}. ${entry.displayText} · ${entry.sourceLabel} · 根：${entry.rootDisplay} · 会话 ${entry.sessionCount} 个",
+                )
+            }
+            append("使用 /workspace use <序号|id> 切换。")
+        }
+    }
+
+/** 工作区概览文案（/workspace 无参）：名称 / 来源 / 根 / 可写 / 会话数。 */
+internal fun workspaceOverviewText(entries: List<WorkspaceEntry>): String {
+    val current = entries.firstOrNull { it.current }
+        ?: return "当前工作区不可用：未读到工作区清单。执行 /workspace list 查看全部工作区。"
+    return buildString {
+        appendLine("当前工作区：${current.name}（${current.sourceLabel}，${current.id}）")
+        appendLine("根目录：${current.rootDisplay}")
+        appendLine("可写：${if (current.writable) "是" else "否（只读授权）"} · 会话：${current.sessionCount} 个")
+        append("使用 /workspace list 查看全部工作区，/workspace use <序号|id> 切换。")
+    }
+}
 
 /** /status 输出：阶段、模型、请求 / 实际后端与统计栏快照。 */
 internal fun shellStatusText(context: ShellContext): String = buildString {

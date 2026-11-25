@@ -75,6 +75,8 @@ data class ShellContext(
     val activeBackend: TerminalBackend = TerminalBackend.NPU,
     val metrics: TerminalMetricsSnapshot = TerminalMetricsSnapshot(),
     val models: List<LocalModelEntry> = LocalModelCatalog.entries,
+    /** 工作区快照（Issue #126）：`/workspace` 的序号 / id 解析与概览文案依据。 */
+    val workspaces: List<WorkspaceEntry> = emptyList(),
 )
 
 /** 解析产物中的状态副作用：由命令路由分发到 TerminalViewModel 的既有接线点。 */
@@ -108,6 +110,9 @@ sealed interface ShellEffect {
 
     /** model delete <序号|名称> --force：解析器已完成二次确认，交给端口执行删除（#111）。 */
     data class DeleteModel(val ordinal: Int, val name: String) : ShellEffect
+
+    /** /workspace 写操作（新建 / 切换 / 重命名 / 删除）：交给工作区端口执行（#126）。 */
+    data class Workspace(val request: WorkspaceRequest) : ShellEffect
 
     /** storage grant：打开系统目录选择器，授权外部目录并挂载为沙盒根。 */
     data object GrantStorage : ShellEffect
