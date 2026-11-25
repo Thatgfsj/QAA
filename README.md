@@ -12,6 +12,8 @@
 | 后端降级链 | Hexagon NPU → HYBRID（HTP+CPU）→ GPU（Adreno 附加档）→ CPU，自动回退并在状态栏回显实际命中后端 |
 | Pi-Style Harness | 纯 Kotlin 极简 Agent Loop，最小工具原语 `read / write / edit / draw_image`，与 UI 彻底解耦 |
 | 双前端 | Normal 正常窗口 / Terminal 终端模式三段式布局，持久化 `ui_mode` 路由，切换即重启生效 |
+| 工作区管理 | 工具沙盒默认根按工作区切换：App 私有目录 `files/workspaces/<id>/` 或系统 SAF 授权目录；会话按工作区隔离，终端 `/workspace` 与 Normal「工作区」页双入口（#126） |
+| 窗口 Agent 化 | Normal 会话页工具调用以执行链卡片呈现（参数/结果可展开、状态与耗时）、确认内联可操作、可停止与重试、指标条含载入中状态（#127） |
 | 树状会话 | JSONL 树形节点存储，`/tree` `/fork` 任意节点分叉，可直接导出为 LoRA 微调轨迹 |
 | 渐进 Skills | 启动仅注入 SKILL.md 名称+一句话描述，命中任务才读全文，保护端侧 Prompt Cache |
 | 系统提示词可编辑 | 终端 `/system` 与 Normal 设置页同一份持久化（#105），保存后下一轮生效、不重载引擎；`/export` 轨迹带提示词来源标记 |
