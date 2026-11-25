@@ -46,6 +46,7 @@ object ShellCommandParser {
             "/logs" -> logs(tokens, context)
             "/ctx" -> contextLength(tokens, context)
             "/system" -> systemPrompt(tokens, line, context)
+            "/workspace" -> parseWorkspace(tokens, line, context)
             "/status" -> statusResult(context)
             "/exit" -> error(context, "当前已在 Shell 顶层态，无需 /exit。输入 help 查看可用命令。")
             else -> unknownShellCommand(tokens.first(), context)
@@ -271,6 +272,7 @@ object ShellCommandParser {
             "/logs" -> logs(tokens, context)
             "/ctx" -> contextLength(tokens, context)
             "/system" -> systemPrompt(tokens, line, context)
+            "/workspace" -> parseWorkspace(tokens, line, context)
             else -> error(
                 context,
                 "未知会话命令：$head。可用命令：/exit、/new、/tree、/fork、/compact、/steer、/skills、/export、/logs、/ctx、/system；" +
@@ -383,6 +385,121 @@ object ShellCommandParser {
     ): ShellParseResult {
         if (tokens.size > 1) return usage(context, command, "$command 不接受参数。")
         return ShellParseResult(stage = context.stage, effects = listOf(effect))
+    }
+
+
+    /**
+     * /workspace [子命令]（#126）：无参概览、list 列表、new / use / rename / rm 写操作。
+     *
+     * 概览与列表直接由 [ShellContext.workspaces] 快照渲染（与本地模型清单一致）；写操作
+     * 解析为 [ShellEffect.Workspace] 交给运行链。rm 对当前工作区直接拒绝，有会话时须带
+     * `--force` 二次确认；内置目录与 SOP 在运行链执行时再校验一次。
+     */
+    private fun parseWorkspace(tokens: List<String>, line: String, context: ShellContext): ShellParseResult {
+        val args = tokens.drop(1)
+        if (args.isEmpty()) return reply(context, workspaceOverviewText(context.workspaces))
+        return when (args.first().lowercase()) {
+            "list" -> if (args.size > 1) {
+                usage(context, "/workspace list", "/workspace list 不接受参数。")
+            } else {
+                reply(context, workspaceListText(context.workspaces))
+            }
+            "new" -> {
+                val name = args.drop(1).joinToString(" ").trim()
+                if (name.isEmpty()) {
+                    usage(context, "/workspace new <名称>", "需要提供工作区名称，例如 /workspace new 资料库。")
+                } else {
+                    ShellParseResult(
+                        stage = context.stage,
+                        output = listOf("正在新建工作区：$name…"),
+                        effects = listOf(ShellEffect.Workspace(WorkspaceRequest.Create(name))),
+                    )
+                }
+            }
+            "use" -> {
+                if (context.stage == ShellStage.SESSION) {
+                    return error(
+                        context,
+                        "工作区切换会更换会话目录：请先 /exit 返回 Shell 顶层态再切换，避免当前会话记录与新目录错位。",
+                    )
+                }
+                if (args.size != 2) return usage(context, "/workspace use <序号|id>", "use 需要且只接受一个序号或 id。")
+                val entry = resolveWorkspace(args[1], context)
+                    ?: return error(context, "未找到工作区：${args[1]}。执行 /workspace list 查看序号与 id。")
+                if (entry.current) return reply(context, "当前已是工作区：${entry.displayText}")
+                ShellParseResult(
+                    stage = context.stage,
+                    effects = listOf(ShellEffect.Workspace(WorkspaceRequest.Use(entry.id))),
+                )
+            }
+            "rename" -> {
+                if (args.size < 3) {
+                    return usage(
+                        context,
+                        "/workspace rename <序号|id> <新名>",
+                        "rename 需要指定工作区与新名称，例如 /workspace rename 1 资料库。",
+                    )
+                }
+                val entry = resolveWorkspace(args[1], context)
+                    ?: return error(context, "未找到工作区：${args[1]}。执行 /workspace list 查看序号与 id。")
+                val newName = args.drop(2).joinToString(" ").trim()
+                if (newName.isEmpty()) return usage(context, "/workspace rename <序号|id> <新名>", "新名称不能为空。")
+                ShellParseResult(
+                    stage = context.stage,
+                    effects = listOf(ShellEffect.Workspace(WorkspaceRequest.Rename(entry.id, newName))),
+                )
+            }
+            "rm" -> parseWorkspaceRemove(args, context)
+            else -> error(
+                context,
+                "未知 /workspace 子命令：${args.first()}。可用：/workspace、list、new <名称>、" +
+                    "use <序号|id>、rename <序号|id> <新名>、rm <序号|id> [--force]。",
+            )
+        }
+    }
+
+    /** /workspace rm：当前工作区直接拒绝；有会话且未带 --force 时只回显影响并要求二次确认。 */
+    private fun parseWorkspaceRemove(args: List<String>, context: ShellContext): ShellParseResult {
+        val force = args.any { it == FORCE_FLAG }
+        val unknown = args.firstOrNull { it.startsWith("-") && it != FORCE_FLAG }
+        if (unknown != null) return error(context, "未知选项：$unknown。/workspace rm 只支持 --force。")
+        val targets = args.drop(1).filterNot { it == FORCE_FLAG }
+        if (targets.size != 1) {
+            return usage(context, "/workspace rm <序号|id> [--force]", "rm 需要且只接受一个工作区序号或 id。")
+        }
+        val entry = resolveWorkspace(targets.single(), context)
+            ?: return error(context, "未找到工作区：${targets.single()}。执行 /workspace list 查看序号与 id。")
+        if (entry.current) {
+            return error(
+                context,
+                "当前工作区不可删除：${entry.displayText}。请先用 /workspace use <序号|id> 切换到其他工作区。",
+            )
+        }
+        if (entry.sessionCount > 0 && !force) {
+            return reply(
+                context,
+                "将删除工作区：${entry.index}. ${entry.displayText}",
+                "根目录：${entry.rootDisplay} · 会话：${entry.sessionCount} 个",
+                "影响：条目与内置目录 / 会话文件将被删除，操作不可撤销；外部目录只解除授权，不删除手机上的文件。",
+                "确认请再次执行：/workspace rm ${entry.id} --force",
+            )
+        }
+        return ShellParseResult(
+            stage = context.stage,
+            output = listOf("正在删除工作区：${entry.displayText}…"),
+            effects = listOf(ShellEffect.Workspace(WorkspaceRequest.Remove(entry.id, force))),
+        )
+    }
+
+    /** 按序号（精确）或 id / 名称（不区分大小写）解析工作区快照。 */
+    private fun resolveWorkspace(token: String, context: ShellContext): WorkspaceEntry? {
+        val index = token.toIntOrNull()
+        return if (index != null) {
+            context.workspaces.firstOrNull { it.index == index }
+        } else {
+            context.workspaces.firstOrNull { it.id.equals(token, ignoreCase = true) }
+                ?: context.workspaces.firstOrNull { it.name.equals(token, ignoreCase = true) }
+        }
     }
 
     // ---- 公共辅助 ----

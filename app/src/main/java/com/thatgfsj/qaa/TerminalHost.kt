@@ -90,6 +90,7 @@ fun TerminalHost(
             agent = runtime,
             modelList = runtime,
             modelPull = runtime,
+            workspaces = runtime,
             onRequestModelImport = importPicker::run,
             onRequestStorageGrant = storagePicker::run,
             scope = scope,

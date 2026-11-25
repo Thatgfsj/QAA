@@ -636,4 +636,143 @@ class ShellCommandParserTest {
     fun systemIsListedInUnknownSessionCommandHint() {
         assertTrue(parse("/foo", session).text().contains("/system"))
     }
+
+    // ---- #126 /workspace 工作区 ----
+
+    private val workspaces = listOf(
+        WorkspaceEntry(
+            index = 0,
+            id = "default",
+            name = "默认工作区",
+            source = com.thatgfsj.qaa.core.harness.WorkspaceSource.INTERNAL,
+            rootDisplay = "files",
+            sessionCount = 1,
+            writable = true,
+            current = true,
+        ),
+        WorkspaceEntry(
+            index = 1,
+            id = "ws-1",
+            name = "资料库",
+            source = com.thatgfsj.qaa.core.harness.WorkspaceSource.INTERNAL,
+            rootDisplay = "files/workspaces/ws-1",
+            sessionCount = 2,
+            writable = true,
+            current = false,
+        ),
+        WorkspaceEntry(
+            index = 2,
+            id = "ws-2",
+            name = "手机目录",
+            source = com.thatgfsj.qaa.core.harness.WorkspaceSource.SAF,
+            rootDisplay = "手机目录（SAF）",
+            sessionCount = 0,
+            writable = false,
+            current = false,
+        ),
+    )
+    private val workspaceShell = shell.copy(workspaces = workspaces)
+
+    @Test
+    fun workspaceWithoutArgumentShowsCurrentOverviewInBothStages() {
+        val result = parse("/workspace", workspaceShell)
+        assertTrue(result.effects.isEmpty())
+        assertTrue(result.text().contains("当前工作区：默认工作区（内置目录，default）"))
+        assertTrue(result.text().contains("根目录：files"))
+        assertTrue(result.text().contains("可写：是"))
+        assertTrue(parse("/workspace", workspaceShell.copy(stage = ShellStage.SESSION)).text().contains("当前工作区：默认工作区"))
+    }
+
+    @Test
+    fun workspaceListShowsAllEntriesAndCurrentMark() {
+        val text = parse("/workspace list", workspaceShell).text()
+        assertTrue(text.contains("工作区清单（共 3 个）"))
+        assertTrue(text.contains("1. 资料库（内置目录，ws-1）"))
+        assertTrue(text.contains("2. 手机目录（外部目录，ws-2）"))
+        assertTrue(text.contains("0. 默认工作区（内置目录，default） · 当前"))
+    }
+
+    @Test
+    fun workspaceNewEmitsCreateWithSpacedName() {
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Create("资料 库 A"))),
+            parse("/workspace new 资料 库 A", workspaceShell).effects,
+        )
+        assertTrue(parse("/workspace new", workspaceShell).text().contains("用法：/workspace new <名称>"))
+    }
+
+    @Test
+    fun workspaceUseIsRefusedInSessionStage() {
+        val result = parse("/workspace use 1", workspaceShell.copy(stage = ShellStage.SESSION))
+        assertTrue(result.effects.isEmpty())
+        assertTrue(result.text().contains("请先 /exit"))
+    }
+
+    @Test
+    fun workspaceUseResolvesIndexAndIdAndSkipsCurrent() {
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Use("ws-1"))),
+            parse("/workspace use 1", workspaceShell).effects,
+        )
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Use("ws-2"))),
+            parse("/workspace use ws-2", workspaceShell).effects,
+        )
+        assertTrue(parse("/workspace use 0", workspaceShell).effects.isEmpty())
+        assertTrue(parse("/workspace use 0", workspaceShell).text().contains("当前已是工作区"))
+        assertTrue(parse("/workspace use 9", workspaceShell).text().contains("未找到工作区：9"))
+    }
+
+    @Test
+    fun workspaceRenameRequiresTargetAndNewName() {
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Rename("ws-1", "资料 库"))),
+            parse("/workspace rename ws-1 资料 库", workspaceShell).effects,
+        )
+        assertTrue(parse("/workspace rename ws-1", workspaceShell).text().contains("用法：/workspace rename"))
+    }
+
+    @Test
+    fun workspaceRemoveRefusesCurrentWorkspace() {
+        val result = parse("/workspace rm 0", workspaceShell)
+        assertTrue(result.effects.isEmpty())
+        assertTrue(result.text().contains("当前工作区不可删除"))
+    }
+
+    @Test
+    fun workspaceRemoveWithSessionsNeedsForceConfirmation() {
+        val preview = parse("/workspace rm 1", workspaceShell)
+        assertTrue(preview.effects.isEmpty())
+        assertTrue(preview.text().contains("会话：2 个"))
+        assertTrue(preview.text().contains("确认请再次执行：/workspace rm ws-1 --force"))
+
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Remove("ws-1", true))),
+            parse("/workspace rm ws-1 --force", workspaceShell).effects,
+        )
+    }
+
+    @Test
+    fun workspaceRemoveWithoutSessionsNeedsNoForce() {
+        assertEquals(
+            listOf(ShellEffect.Workspace(WorkspaceRequest.Remove("ws-2", false))),
+            parse("/workspace rm 2", workspaceShell).effects,
+        )
+    }
+
+    @Test
+    fun workspaceRejectsUnknownOptionAndSubcommand() {
+        assertTrue(parse("/workspace rm 2 --all", workspaceShell).text().contains("只支持 --force"))
+        assertTrue(parse("/workspace switch 1", workspaceShell).text().contains("未知 /workspace 子命令"))
+    }
+
+    @Test
+    fun workspaceOverviewWithoutSnapshotReportsUnavailable() {
+        assertTrue(parse("/workspace").text().contains("当前工作区不可用"))
+    }
+
+    @Test
+    fun helpListsWorkspaceCommand() {
+        assertTrue(parse("help").text().contains("/workspace"))
+    }
 }

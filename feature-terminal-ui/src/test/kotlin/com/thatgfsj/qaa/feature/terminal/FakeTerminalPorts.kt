@@ -114,6 +114,49 @@ class FakeTerminalAgentPort(
         deleteModelText.also { deletedModels += ordinal to name }
 }
 
+
+/** 工作区端口替身（#126）：快照可替换，写操作记录请求并返回脚本回执。 */
+class FakeTerminalWorkspacePort(
+    private var entries: List<WorkspaceEntry> = defaultWorkspaces(),
+) : TerminalWorkspacePort {
+
+    val requests = mutableListOf<WorkspaceRequest>()
+    var entriesCalls = 0
+    var resultText = "工作区已更新。"
+
+    override suspend fun workspaces(): List<WorkspaceEntry> {
+        entriesCalls += 1
+        return entries
+    }
+
+    override suspend fun workspace(request: WorkspaceRequest): String {
+        requests += request
+        return resultText
+    }
+
+    /** 替换快照（模拟切换后的最新清单）。 */
+    fun setEntries(next: List<WorkspaceEntry>) {
+        entries = next
+    }
+
+    companion object {
+        /** 默认快照：内置默认工作区 + 一个带会话的内置工作区。 */
+        fun defaultWorkspaces(): List<WorkspaceEntry> = listOf(
+            WorkspaceEntry(0, "default", "默认工作区", com.thatgfsj.qaa.core.harness.WorkspaceSource.INTERNAL, "files", 0, true, true),
+            WorkspaceEntry(
+                index = 1,
+                id = "ws-1",
+                name = "资料库",
+                source = com.thatgfsj.qaa.core.harness.WorkspaceSource.INTERNAL,
+                rootDisplay = "files/workspaces/ws-1",
+                sessionCount = 2,
+                writable = true,
+                current = false,
+            ),
+        )
+    }
+}
+
 /** 模型清单替身（序号与名称沿用 LocalModelEntry）。 */
 class FakeTerminalModelList(private val fixed: List<LocalModelEntry>) : TerminalModelListPort {
 

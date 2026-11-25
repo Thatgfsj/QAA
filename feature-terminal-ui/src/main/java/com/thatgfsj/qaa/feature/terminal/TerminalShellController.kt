@@ -27,6 +27,7 @@ class TerminalShellController(
     private val agent: TerminalAgentPort? = null,
     private val modelList: TerminalModelListPort? = null,
     private val modelPull: TerminalModelPullPort? = null,
+    private val workspaces: TerminalWorkspacePort? = null,
     private val onRequestModelImport: () -> Unit = {},
     private val onRequestStorageGrant: () -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
@@ -43,11 +44,15 @@ class TerminalShellController(
     /** 模型清单快照：初值来自构造参数，接线后由 ModelCatalog 刷新。 */
     private var modelsSnapshot: List<LocalModelEntry> = models
 
+    /** 工作区快照（#126）：初值空，接线后由 [TerminalWorkspacePort] 刷新。 */
+    private var workspacesSnapshot: List<WorkspaceEntry> = emptyList()
+
     private var promptNoticeShown = false
     private var pullJob: Job? = null
 
     init {
         refreshModels()
+        refreshWorkspaces()
     }
 
     /** 终端输入行入口：空输入忽略；其余按当前阶段解析后分发。 */
@@ -63,6 +68,7 @@ class TerminalShellController(
             activeBackend = snapshot.backend,
             metrics = snapshot.metrics,
             models = modelsSnapshot,
+            workspaces = workspacesSnapshot,
         )
         apply(input, ShellCommandParser.parse(input, context))
     }
@@ -108,6 +114,7 @@ class TerminalShellController(
             // #99：/tree 一律经 sessionTreeOutput 兜底，空树给空态提示、非空补图例。
             ShellEffect.QueryTree -> query { sessionTreeOutput(it.tree()) }
             is ShellEffect.DeleteModel -> deleteModel(effect)
+            is ShellEffect.Workspace -> workspaceCommand(effect.request)
             is ShellEffect.ForkNode -> query { required(it.fork(effect.nodeId)) }
             ShellEffect.CompactContext -> query { required(it.compact()) }
             ShellEffect.QuerySkills -> query { required(it.skills()) }
@@ -264,6 +271,41 @@ class TerminalShellController(
                 emptyList()
             }
             if (entries.isNotEmpty()) modelsSnapshot = entries
+        }
+    }
+
+    /** /workspace 写操作：执行体回中文字符串，成功后刷新快照；失败也保留旧快照。 */
+    private fun workspaceCommand(request: WorkspaceRequest) {
+        val port = workspaces
+        if (port == null) {
+            viewModel.appendOutput(UNWIRED_NOTICE)
+            return
+        }
+        scope.launch {
+            val text = try {
+                port.workspace(request)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                "工作区操作失败：${error.message ?: error::class.simpleName}"
+            }
+            viewModel.appendOutput(required(text))
+            refreshWorkspaces()
+        }
+    }
+
+    /** 从工作区端口刷新快照（失败保持旧快照，不影响命令可用性）。 */
+    fun refreshWorkspaces() {
+        val port = workspaces ?: return
+        scope.launch {
+            val entries = try {
+                port.workspaces()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (entries.isNotEmpty()) workspacesSnapshot = entries
         }
     }
 

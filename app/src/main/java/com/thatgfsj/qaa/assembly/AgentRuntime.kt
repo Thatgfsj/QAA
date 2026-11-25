@@ -20,6 +20,10 @@ import com.thatgfsj.qaa.core.harness.SteerQueue
 import com.thatgfsj.qaa.core.harness.SteerTurnDriver
 import com.thatgfsj.qaa.core.harness.ToolCall
 import com.thatgfsj.qaa.core.harness.TreeSessionStore
+import com.thatgfsj.qaa.core.harness.Workspace
+import com.thatgfsj.qaa.core.harness.WorkspaceSource
+import com.thatgfsj.qaa.core.harness.WorkspaceStore
+import com.thatgfsj.qaa.core.harness.summarizeToolCall
 import com.thatgfsj.qaa.core.inference.AndroidAssetSource
 import com.thatgfsj.qaa.core.inference.AssetModelReleaser
 import com.thatgfsj.qaa.core.inference.ComputeBackend
@@ -69,6 +73,9 @@ import com.thatgfsj.qaa.feature.terminal.TerminalModelLoadState
 import com.thatgfsj.qaa.feature.terminal.TerminalModelListPort
 import com.thatgfsj.qaa.feature.terminal.TerminalModelPullPort
 import com.thatgfsj.qaa.feature.terminal.TerminalPullEvent
+import com.thatgfsj.qaa.feature.terminal.TerminalWorkspacePort
+import com.thatgfsj.qaa.feature.terminal.WorkspaceEntry
+import com.thatgfsj.qaa.feature.terminal.WorkspaceRequest
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -113,11 +120,24 @@ class AgentRuntime private constructor(
     NormalAgentPort,
     TerminalModelListPort,
     TerminalModelPullPort,
-    NormalModelPort {
+    NormalModelPort,
+    TerminalWorkspacePort {
 
     private val filesDir: File = appContext.filesDir
     private val modelsDir = File(filesDir, MODELS_DIR)
-    private val sessionsDir = File(filesDir, TreeSessionStore.DEFAULT_SESSIONS_DIR)
+    private val sessionsRoot = File(filesDir, TreeSessionStore.DEFAULT_SESSIONS_DIR)
+    /** 旧版会话迁移（#126）：首启把 sessions 根下的 *.jsonl 移入 sessions/default/，幂等。 */
+    private val legacySessionsMigrated = WorkspaceStore.migrateLegacySessions(sessionsRoot)
+    private val workspaceStore = WorkspaceStore(WorkspaceStore.manifestFile(filesDir))
+    /** 启动工作区根：SAF 授权失效时回退默认工作区（不阻断启动链）。 */
+    private val bootWorkspaceRoot: SandboxRoot = run {
+        val current = workspaceStore.current()
+        runCatching { WorkspaceRoots.rootOf(appContext, filesDir, current) }.getOrElse {
+            workspaceStore.select(WorkspaceStore.DEFAULT_ID)
+            WorkspaceRoots.rootOf(appContext, filesDir, workspaceStore.current())
+        }
+    }
+    private var sessionsDir = WorkspaceRoots.sessionsDir(filesDir, workspaceStore.currentId())
     private val skillsDir = File(filesDir, SKILLS_DIR)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -142,8 +162,10 @@ class AgentRuntime private constructor(
     /** 模型删除链路（#111）：终端 model delete 与 Normal 模型页共用同一实现。 */
     private val deleter = ModelDeleter(modelsDir, catalog, DefaultGenieXModelGateway)
     private val pullClient = ModelPullClient()
-    private val sandbox = LocalSandboxFs(listOf(SandboxRoot.File(SANDBOX_ROOT_ID, filesDir.toPath())))
+    private val sandbox = LocalSandboxFs(listOf(bootWorkspaceRoot))
     private val storageGrant = StorageGrant(appContext, sandbox)
+    /** 工作区管理（#126）：终端 /workspace 与 Normal 工作区页共用。 */
+    private val workspaceController = WorkspaceController(appContext, filesDir, workspaceStore, sandbox)
     private val modelImport = ModelImportCoordinator(modelsDir, catalog)
 
     // 下载记录（私有清单文件）与编排：Application 级 scope 持有；进程退出后记录留存，
@@ -161,7 +183,7 @@ class AgentRuntime private constructor(
         sessionId = SESSION_ID,
         file = TreeSessionStore.fileFor(sessionsDir, SESSION_ID),
     )
-    private val sessionSwitcher = SessionSwitcher(sessionsDir)
+    private var sessionSwitcher = SessionSwitcher(sessionsDir)
     private val jsonlRecorder = JsonlTurnRecorder(sessionStore)
     private val skills = SkillRegistry.fromDirectory(skillsDir)
     private val tokenCounter = HeuristicTokenCounter()
@@ -777,6 +799,58 @@ class AgentRuntime private constructor(
         bytes >= 1024L * 1024 -> "%.1f MB".format(java.util.Locale.ROOT, bytes / 1024.0 / 1024.0)
         bytes >= 1024L -> "%.1f KB".format(java.util.Locale.ROOT, bytes / 1024.0)
         else -> "$bytes B"
+    }
+    // ---- 工作区管理（#126，终端 /workspace） ----
+
+    override suspend fun workspaces(): List<WorkspaceEntry> = withContext(Dispatchers.IO) {
+        workspaceController.terminalEntries()
+    }
+
+    override suspend fun workspace(request: WorkspaceRequest): String = when (request) {
+        WorkspaceRequest.Overview, WorkspaceRequest.ListAll ->
+            "请使用 /workspace 查看概览、/workspace list 查看清单（概览与列表由终端直接渲染）。"
+        is WorkspaceRequest.Create -> withContext(Dispatchers.IO) { workspaceController.createInternal(request.name) }
+        is WorkspaceRequest.Use -> switchWorkspaceShared(request.id)
+        is WorkspaceRequest.Rename -> withContext(Dispatchers.IO) {
+            workspaceController.rename(request.id, request.newName)
+        }
+        is WorkspaceRequest.Remove -> withContext(Dispatchers.IO) {
+            workspaceController.remove(request.id, request.force)
+        }
+    }
+
+    /**
+     * 切换工作区（#126）：先切沙盒默认根，再重建会话存储到新工作区目录。
+     *
+     * 轮次进行中拒绝切换（会话文件 / 工具会话 id 正在使用）；SAF 授权失效时保留原工作区并回中文原因。
+     */
+    private suspend fun switchWorkspaceShared(id: String): String {
+        if (turnMutex.isLocked) return "轮次进行中：暂不能切换工作区，请等本轮结束后重试。"
+        val previous = workspaceController.current()
+        if (previous.id == id) return "当前已是工作区：${previous.name}（id ${previous.id}）。"
+        val workspace = try {
+            withContext(Dispatchers.IO) { workspaceController.select(id) }
+        } catch (error: WorkspaceUnavailableException) {
+            return error.message ?: "工作区切换失败。"
+        }
+        rebindWorkspaceSession(workspace)
+        val source = if (workspace.source == WorkspaceSource.SAF) "外部目录" else "内置目录"
+        return "已切换工作区：${workspace.name}（id ${workspace.id}，$source）；" +
+            "会话目录 files/sessions/${workspace.id}/，工具沙盒默认根已同步切换。"
+    }
+
+    /** 切换后重建会话存储：旧 store 关闭，新工作区目录建 main.jsonl 并重绑记录器与工具会话 id。 */
+    private fun rebindWorkspaceSession(workspace: Workspace) {
+        val previous = sessionStore
+        val dir = workspaceController.sessionsDir(workspace.id)
+        dir.mkdirs()
+        sessionsDir = dir
+        sessionSwitcher = SessionSwitcher(dir)
+        val store = TreeSessionStore(sessionId = SESSION_ID, file = TreeSessionStore.fileFor(dir, SESSION_ID))
+        recorder.rebind(JsonlTurnRecorder(store))
+        sessionStore = store
+        toolGateway.rebindSession(store.sessionId)
+        previous.close()
     }
 
     // ---- 系统选择器接线 ----

@@ -38,10 +38,11 @@ class ShellHelpSnapshotTest {
             "/logs [行数]",
             "/ctx [token]",
             "/system [文本|reset]",
+            "/workspace",
         )
         val text = shellHelpText()
         commands.forEach { command -> assertTrue("缺少命令：$command", text.contains(command)) }
-        assertEquals(23, rowsOf(text).size)
+        assertEquals(24, rowsOf(text).size)
     }
 
     @Test
@@ -92,6 +93,7 @@ class ShellHelpSnapshotTest {
     /logs [行数]          全部      导出应用内日志（默认 200 行）
     /ctx [token]          全部      查看 / 设置上下文长度
     /system [文本|reset]  全部      查看 / 设置系统提示词
+    /workspace            全部      工作区概览 / 管理（list/new/use/rename/rm）
 
     提示：
     · 会话态下直接输入文字即为用户 prompt；输入 /exit 返回 Shell 顶层态。
@@ -102,6 +104,7 @@ class ShellHelpSnapshotTest {
     · /ctx 长度：建议 4096 / 8192 / 16384 / 32768，亦可自定义 1024~1048576（支持 20k / 64k / 1m）。
     · ≤8192 且模型已加载时 /ctx 自动重载生效，更大值需重新载入模型；长上下文可能因内存溢出闪退（进程级崩溃），建议先用小长度验证。
     · /system 无参查看系统提示词全文与来源；带文本整体替换，/system reset 恢复默认；提示词每轮组装，下一轮生效。
+    · /workspace 无参查看概览；list 列出全部；new <名称> 新建内置工作区；use <序号|id> 切换；rename <序号|id> <新名>；rm <序号|id> [--force]。
     · 轮次运行中可输入 /steer 打断，或直接输入文字进 Follow-up 队列。
         """.trimIndent().trimEnd()
     }
