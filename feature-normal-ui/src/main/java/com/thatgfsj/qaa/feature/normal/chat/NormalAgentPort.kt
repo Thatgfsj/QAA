@@ -8,8 +8,10 @@ import kotlinx.coroutines.flow.Flow
  * Normal 端没有命令层，输入即一轮对话；工具确认由装配层注入的确认门在运行中自然挂起。
  * null 表示未接线（骨架期），[ChatViewModel] 退回模块内 fake 流式回复。
  *
- * #127 新增能力（默认 null，旧实现不受影响）：
- * - [chatSegments]：结构化轮次事件流（工具卡片 / 确认条 / 错误段）。
+ * #127 新增能力（均有默认空实现，旧实现不受影响）：
+ * - [chatSegments]：结构化轮次事件流（工具卡片 / 确认条 / 错误段）；
+ * - [allowPendingTool] / [denyPendingTool]：内联确认按钮直达确认门。
+ * 停止按钮不新增端口：ViewModel 直接取消本轮协程（abort），运行链 finally 收口。
  */
 interface NormalAgentPort {
 
@@ -30,4 +32,10 @@ interface NormalAgentPort {
      * 装配层负责把 harness 工具步 / 确认挂起 / 轮次错误映射成 [ChatSegment]。
      */
     val chatSegments: Flow<ChatSegment>? get() = null
+
+    /** 内联确认「允许」：转发到当前确认门；未挂起或未接线时无操作。 */
+    fun allowPendingTool() {}
+
+    /** 内联确认「拒绝」：转发到当前确认门；未挂起或未接线时无操作。 */
+    fun denyPendingTool() {}
 }

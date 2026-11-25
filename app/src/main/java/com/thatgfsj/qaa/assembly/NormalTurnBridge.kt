@@ -11,6 +11,7 @@ import com.thatgfsj.qaa.feature.normal.chat.CHAT_SEGMENT_AGENT_ID_BASE
 import com.thatgfsj.qaa.feature.normal.chat.ChatSegment
 import com.thatgfsj.qaa.feature.normal.chat.ConfirmSegmentState
 import com.thatgfsj.qaa.feature.normal.chat.ToolSegmentStatus
+import com.thatgfsj.qaa.feature.normal.confirm.NormalGate
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -221,6 +222,20 @@ internal class DelegatingConfirmationGate(
 
     fun bind(gate: ConfirmationGate) {
         delegate = gate
+    }
+
+    /** 内联确认「允许」：仅 Normal 端确认门支持，其余前端返回 false。 */
+    fun allowPending(): Boolean {
+        val gate = delegate as? NormalGate ?: return false
+        gate.allow()
+        return true
+    }
+
+    /** 内联确认「拒绝」：仅 Normal 端确认门支持，其余前端返回 false。 */
+    fun denyPending(): Boolean {
+        val gate = delegate as? NormalGate ?: return false
+        gate.deny()
+        return true
     }
 
     override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision {
