@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -37,11 +38,14 @@ import com.thatgfsj.qaa.feature.normal.settings.SettingsScreen
 import com.thatgfsj.qaa.feature.normal.status.BackendStatusBar
 import com.thatgfsj.qaa.feature.normal.status.FakeInferenceStatusSource
 import com.thatgfsj.qaa.feature.normal.status.InferenceStatusSource
+import com.thatgfsj.qaa.feature.normal.workspace.NormalWorkspacePort
+import com.thatgfsj.qaa.feature.normal.workspace.WorkspaceScreen
 
 /** Normal 前端三页路由（Issue #8）。 */
 object NormalRoutes {
     const val CHAT = "chat"
     const val MODELS = "models"
+    const val WORKSPACES = "workspaces"
     const val SETTINGS = "settings"
 }
 
@@ -58,6 +62,7 @@ object NormalRoutes {
  * [contextTokens] / [onContextTokensChange] 为上下文长度设置（#106）：设置页只保存不重载。
  * [systemPrompt] / [onSystemPromptSave] / [onSystemPromptReset] 为系统提示词设置（#105）：
  * 与终端 /system 共用 DataStore，保存后下一轮生效。
+ * [workspacePort] 为工作区页端口（#126）；[onPickWorkspaceTree] 由宿主触发 SAF 目录选择。
  */
 @Composable
 fun NormalApp(
@@ -72,6 +77,8 @@ fun NormalApp(
     systemPrompt: String = PromptAssembler.DEFAULT_SYSTEM_PROMPT,
     onSystemPromptSave: (String) -> Unit = {},
     onSystemPromptReset: () -> Unit = {},
+    workspacePort: NormalWorkspacePort? = null,
+    onPickWorkspaceTree: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val status by statusSource.status.collectAsStateWithLifecycle()
@@ -110,6 +117,12 @@ fun NormalApp(
                     label = { Text("模型") },
                 )
                 NavigationBarItem(
+                    selected = currentRoute == NormalRoutes.WORKSPACES,
+                    onClick = { navController.navigateTab(NormalRoutes.WORKSPACES) },
+                    icon = { Icon(Icons.Filled.Place, contentDescription = null) },
+                    label = { Text("工作区") },
+                )
+                NavigationBarItem(
                     selected = currentRoute == NormalRoutes.SETTINGS,
                     onClick = { navController.navigateTab(NormalRoutes.SETTINGS) },
                     icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
@@ -125,6 +138,9 @@ fun NormalApp(
         ) {
             composable(NormalRoutes.CHAT) { ChatScreen(viewModel = chatViewModel) }
             composable(NormalRoutes.MODELS) { ModelManageScreen(modelPort = modelPort) }
+            composable(NormalRoutes.WORKSPACES) {
+                WorkspaceScreen(port = workspacePort, onPickWorkspaceTree = onPickWorkspaceTree)
+            }
             composable(NormalRoutes.SETTINGS) {
                 SettingsScreen(
                     onSwitchToTerminal = onSwitchToTerminal,

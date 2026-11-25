@@ -12,6 +12,7 @@ import com.thatgfsj.qaa.core.harness.WorkspaceSource
 import com.thatgfsj.qaa.core.harness.WorkspaceStore
 import com.thatgfsj.qaa.core.tools.LocalSandboxFs
 import com.thatgfsj.qaa.core.tools.SandboxRoot
+import com.thatgfsj.qaa.feature.normal.workspace.NormalWorkspaceEntry
 import com.thatgfsj.qaa.feature.terminal.WorkspaceEntry
 import java.io.File
 
@@ -181,6 +182,19 @@ class WorkspaceController(
             )
         }
 
+    /** Normal 工作区页条目。 */
+    fun normalEntries(): List<NormalWorkspaceEntry> =
+        store.list().map { workspace ->
+            NormalWorkspaceEntry(
+                id = workspace.id,
+                name = workspace.name,
+                sourceLabel = if (workspace.source == WorkspaceSource.SAF) "外部目录" else "内置目录",
+                rootDisplay = WorkspaceRoots.rootDisplay(context, filesDir, workspace),
+                sessionCount = WorkspaceRoots.sessionCount(filesDir, workspace.id),
+                writable = isWritable(workspace),
+                current = workspace.id == store.currentId(),
+            )
+        }
 
     /** 把当前工作区的根挂载为沙盒默认根（保留 ext 等附加根）。 */
     fun attachCurrentRoot() {
