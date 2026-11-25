@@ -35,7 +35,7 @@
 :feature-terminal-ui  终端模式：Shell 命令解析、三段式会话视图、实时统计栏
 ```
 
-详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/ROADMAP.md](docs/ROADMAP.md)。
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、[docs/ROADMAP.md](docs/ROADMAP.md) 与发布流程 [docs/RELEASING.md](docs/RELEASING.md)。
 
 ## 快速开始
 

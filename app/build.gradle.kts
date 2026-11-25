@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -12,11 +14,40 @@ android {
         applicationId = "com.thatgfsj.qaa"
         minSdk = 27
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.5"
         // 契约：仅 arm64-v8a（docs/ARCHITECTURE.md 第 1 节）
         ndk {
             abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    // 发布签名（#113）：默认复用本机 ~/.android/debug.keystore，使 release 包与既有 debug 安装同证书，
+    // 从而 `adb install -r` 可原地升级并保留沙盒内的模型/会话/设置（换证书会签名不匹配、只能卸载重装，数据全丢）。
+    // 正式证书可通过环境变量或 local.properties 覆盖；两者都不存在时保持未签名产物。
+    // 解析顺序：QAA_KEYSTORE_* 环境变量 → local.properties 的 qaa.keystore.* → ~/.android/debug.keystore。
+    val localProps = Properties().apply {
+        val propsFile = rootProject.file("local.properties")
+        if (propsFile.exists()) propsFile.inputStream().use { load(it) }
+    }
+    fun signingValue(envName: String, propName: String, fallback: String): String =
+        System.getenv(envName) ?: localProps.getProperty(propName) ?: fallback
+
+    val releaseKeystore = file(
+        signingValue(
+            "QAA_KEYSTORE_FILE",
+            "qaa.keystore.file",
+            "${System.getProperty("user.home")}/.android/debug.keystore",
+        ),
+    )
+    if (releaseKeystore.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = signingValue("QAA_KEYSTORE_PASSWORD", "qaa.keystore.password", "android")
+                keyAlias = signingValue("QAA_KEY_ALIAS", "qaa.key.alias", "androiddebugkey")
+                keyPassword = signingValue("QAA_KEY_PASSWORD", "qaa.key.password", "android")
+            }
         }
     }
 
@@ -24,6 +55,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseKeystore.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }
 
