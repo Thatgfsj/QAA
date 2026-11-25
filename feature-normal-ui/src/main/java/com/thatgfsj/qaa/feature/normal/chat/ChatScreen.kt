@@ -1,5 +1,6 @@
 package com.thatgfsj.qaa.feature.normal.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,16 +40,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.thatgfsj.qaa.feature.normal.model.ChatRole
 
 /**
- * 流式会话页（Issue #8 → #127 · 段模型与工具卡片）：消息气泡 + 工具执行链卡片 + 指标条。
+ * 流式会话页（Issue #8 → #127 窗口 Agent 化）：消息气泡 + 工具执行链卡片 +
+ * 内联确认操作条 + 停止 / 重试 + 指标条。
  *
- * 渲染只依赖 [ChatViewModel.segments]；连续工具段由 [chatTimeline] 聚合成执行链，
- * 卡片参数 / 结果按需展开且展开态按段 id 记忆（状态更新不丢展开态）。确认交互仍走
- * NormalApp 顶层兜底对话框，内联确认 / 停止 / 重试属 #127 B 段。
+ * 渲染只依赖 [ChatViewModel.segments] 时间线（文本 / 工具 / 确认 / 错误四类段），
+ * 连续工具段由 [chatTimeline] 聚合成执行链；工具卡片的参数与结果按需展开，
+ * 展开状态按段 id 记忆，状态更新（等待确认 → 执行中 → 成功）不会丢展开态。
  */
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     val segments by viewModel.segments.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+    val canRetry by viewModel.canRetry.collectAsStateWithLifecycle()
     val metrics by viewModel.metrics.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -68,11 +72,16 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             items(timeline, key = { it.listKey() }) { entry ->
                 when (entry) {
                     is ChatTimelineEntry.Text -> MessageBubble(entry.segment)
-                    is ChatTimelineEntry.ToolChain -> ToolChainCard(entry)
+                    is ChatTimelineEntry.ToolChain -> ToolChainCard(
+                        chain = entry,
+                        onAllow = viewModel::allowTool,
+                        onDeny = viewModel::denyTool,
+                    )
                     is ChatTimelineEntry.Error -> ErrorRow(entry.segment)
                 }
             }
         }
+        // 指标条：一行小字常驻，模型载入中 / 未载入模型时给出明确占位（与终端同源）。
         Text(
             text = metrics.metricsBarText(),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -80,6 +89,11 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
         )
+        if (canRetry && !isGenerating) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                TextButton(onClick = viewModel::retry) { Text("重试") }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.Bottom,
@@ -93,16 +107,21 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 maxLines = 4,
             )
             Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    viewModel.send(input)
-                    input = ""
-                },
-                enabled = input.isNotBlank() && !isGenerating,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
-                Spacer(Modifier.width(4.dp))
-                Text("发送")
+            if (isGenerating) {
+                // 停止：取消本轮协程（abort），收口后可「重试」。
+                OutlinedButton(onClick = viewModel::stop) { Text("停止") }
+            } else {
+                Button(
+                    onClick = {
+                        viewModel.send(input)
+                        input = ""
+                    },
+                    enabled = input.isNotBlank(),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                    Spacer(Modifier.width(4.dp))
+                    Text("发送")
+                }
             }
         }
     }
@@ -137,9 +156,13 @@ private fun MessageBubble(segment: ChatSegment.Text) {
     }
 }
 
-/** 执行链卡片：多步合并展示，每步独立状态 / 耗时 / 参数 / 结果。 */
+/** 执行链卡片：多步合并展示，每步独立状态 / 耗时 / 参数 / 结果，确认条挂在链内。 */
 @Composable
-private fun ToolChainCard(chain: ChatTimelineEntry.ToolChain) {
+private fun ToolChainCard(
+    chain: ChatTimelineEntry.ToolChain,
+    onAllow: () -> Unit,
+    onDeny: () -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -152,6 +175,9 @@ private fun ToolChainCard(chain: ChatTimelineEntry.ToolChain) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             chain.steps.forEach { step -> ToolStepRow(step) }
+            chain.confirm?.takeIf { it.state == ConfirmSegmentState.PENDING }?.let { confirm ->
+                ConfirmActionRow(confirm, onAllow, onDeny)
+            }
         }
     }
 }
@@ -200,6 +226,32 @@ private fun ToolStepRow(step: ChatSegment.ToolCall) {
     }
 }
 
+/** 内联确认操作条（需求 2）：请求描述 + 允许 / 拒绝；顶层弹窗仍为兜底。 */
+@Composable
+private fun ConfirmActionRow(
+    confirm: ChatSegment.Confirm,
+    onAllow: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "等待确认：${confirm.description}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onAllow) { Text("允许") }
+            OutlinedButton(onClick = onDeny) { Text("拒绝") }
+        }
+    }
+}
+
 /** 状态小标签：等待确认 / 执行中 / 成功 / 失败 / 已拒绝。 */
 @Composable
 private fun StatusChip(status: ToolSegmentStatus) {
@@ -234,7 +286,7 @@ private fun MonoBlock(text: String) {
     }
 }
 
-/** 错误段：失败原因提示。 */
+/** 错误段：失败原因 + 由时间线下方的「重试」按钮兜底（此处只提示）。 */
 @Composable
 private fun ErrorRow(segment: ChatSegment.Error) {
     Surface(

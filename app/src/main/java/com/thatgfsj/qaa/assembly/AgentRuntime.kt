@@ -87,6 +87,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -689,18 +690,29 @@ class AgentRuntime private constructor(
     override val assistantTokens: Flow<String> =
         assistantStream.mapNotNull { (it as? AssistantStreamEvent.Delta)?.text }
 
-    /** Normal 会话页指标条：与终端统计栏同源，只做形状映射。 */
-    override val chatMetrics: Flow<ChatMetrics> = metrics.map { snapshot ->
+    /** Normal 会话页指标条：与终端统计栏同源（含模型载入态），只做形状映射。 */
+    override val chatMetrics: Flow<ChatMetrics> = combine(metrics, _modelLoad) { snapshot, load ->
         ChatMetrics(
             ttftMs = snapshot.ttftMs,
             tokensPerSecond = snapshot.tokensPerSecond,
             tokensUsed = snapshot.tokensUsed,
             contextTokens = snapshot.contextTokens,
+            loading = load is TerminalModelLoadState.Loading,
         )
     }
 
     /** Normal 会话页时间线（#127）：工具卡片 / 确认条 / 错误段的 upsert 流。 */
     override val chatSegments: Flow<ChatSegment> = normalTurnBridge.segments
+
+    /** 内联确认「允许」：直达 Normal 确认门；未挂起 / 非 Normal 前端时无操作。 */
+    override fun allowPendingTool() {
+        gate.allowPending()
+    }
+
+    /** 内联确认「拒绝」：直达 Normal 确认门；未挂起 / 非 Normal 前端时无操作。 */
+    override fun denyPendingTool() {
+        gate.denyPending()
+    }
 
     // ---- TerminalModelListPort / TerminalModelPullPort ----
 

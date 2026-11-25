@@ -13,11 +13,22 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 会话页 ViewModel（Issue #8 骨架 → #127 · 段模型）。
+ * 会话页 ViewModel（Issue #8 骨架 → #127 窗口 Agent 化）。
  *
- * [segments] 是唯一事实来源；装配层以「同 id 覆盖、新 id 追加」推入工具类段，
- * 本类负责文本段流式拼装与轮次状态（空闲 / 生成中），并把确认挂起镜像给顶层
- * 兜底对话框（[toolConfirmPending]）。停止 / 重试 / 内联确认按钮属 #127 B 段。
+ * 时间线模型：[segments] 是唯一事实来源（文本气泡 / 工具卡片 / 确认条 / 错误段），
+ * 装配层以「同 id 覆盖、新 id 追加」的 upsert 语义推入工具类段，本类负责文本段的
+ * 流式拼装与轮次状态机（生成中 / 可停止 / 可重试）。
+ *
+ * 状态机：
+ * ```
+ * 空闲 --send--> 生成中(端口) --ask 返回--> 空闲
+ *                    |--stop()--> 已停止(可重试)
+ *                    |--错误段--> 失败(可重试)
+ * 已停止/失败 --retry()--> 生成中(沿用上一条用户消息，不再追加气泡)
+ * ```
+ *
+ * 停止语义：取消本轮协程（等价 abort），运行链 finally 会收口流式行与轮次互斥；
+ * 确认挂起中停止同样走取消路径，确认门 finally 清空挂起状态。
  */
 class ChatViewModel(
     private val tokenIntervalMs: Long = DEFAULT_TOKEN_INTERVAL_MS,
@@ -30,7 +41,11 @@ class ChatViewModel(
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
-    /** 待确认工具描述（NormalApp 顶层兜底对话框镜像用）。 */
+    private val _canRetry = MutableStateFlow(false)
+    /** 上一轮失败或被停止，可「重试」重跑同一条用户消息。 */
+    val canRetry: StateFlow<Boolean> = _canRetry.asStateFlow()
+
+    /** 待确认工具描述（NormalApp 顶层兜底对话框镜像用；内联确认由 [ChatSegment.Confirm] 表达）。 */
     private val _toolConfirmPending = MutableStateFlow<String?>(null)
     val toolConfirmPending: StateFlow<String?> = _toolConfirmPending.asStateFlow()
 
@@ -44,6 +59,16 @@ class ChatViewModel(
     /** 指标 / 段流收集任务：端口重绑时先取消，避免双来源争写。 */
     private var metricsJob: Job? = null
     private var segmentsJob: Job? = null
+
+    /** 当前轮次协程：停止按钮直接取消它（生成期 abort 的既有路径）。 */
+    private var turnJob: Job? = null
+
+    /** 上一条用户消息：失败 / 停止后重试复用，不再追加用户气泡。 */
+    private var lastUserText: String? = null
+
+    /** 本轮是否被用户停止（决定收尾时是否补错误段与重试态）。 */
+    private var stopRequested = false
+
 
     private var nextTextId = 0L
 
@@ -79,6 +104,32 @@ class ChatViewModel(
         runTurn(trimmed)
     }
 
+    /** 重试上一轮：失败 / 停止后把同一条用户消息重新跑一轮（不重复用户气泡）。 */
+    fun retry() {
+        val text = lastUserText ?: return
+        if (_isGenerating.value) return
+        // 清掉上一轮的错误段，避免重试成功后仍显示失败提示。
+        _segments.update { list -> list.filterNot { it is ChatSegment.Error } }
+        runTurn(text)
+    }
+
+    /** 停止当前轮次：取消本轮协程，收口后进入「已停止、可重试」。 */
+    fun stop() {
+        if (!_isGenerating.value) return
+        stopRequested = true
+        turnJob?.cancel()
+    }
+
+    /** 内联确认「允许」（直达装配层确认门）。 */
+    fun allowTool() {
+        agent?.allowPendingTool()
+    }
+
+    /** 内联确认「拒绝」（直达装配层确认门）。 */
+    fun denyTool() {
+        agent?.denyPendingTool()
+    }
+
     /** 同步待确认工具描述（null 表示无）；确认门的挂起状态由装配层镜像到这里。 */
     fun setToolConfirmPending(description: String?) {
         _toolConfirmPending.value = description?.trim()?.takeIf { it.isNotEmpty() }
@@ -86,11 +137,14 @@ class ChatViewModel(
 
     /** 一轮执行：真实端口优先，未接线时走 fake 脚本流。 */
     private fun runTurn(text: String) {
+        lastUserText = text
+        stopRequested = false
         _isGenerating.value = true
+        _canRetry.value = false
         val replyId = nextTextId++
         upsertSegment(ChatSegment.Text(replyId, ChatRole.ASSISTANT, ""))
         val port = agent
-        viewModelScope.launch {
+        turnJob = viewModelScope.launch {
             val streamJob: Job? = if (port == null) null else port.assistantTokens?.let { tokens ->
                 launch { tokens.collect { token -> appendStreaming(replyId, token) } }
             }
@@ -102,6 +156,7 @@ class ChatViewModel(
                     }
                 } else {
                     val reply = port.ask(text)
+                    // 端口返回值为权威终稿：覆盖流式预览（可含工具调用片段或格式差异）。
                     if (reply.isNotEmpty()) {
                         replaceText(replyId, reply)
                     }
@@ -118,25 +173,37 @@ class ChatViewModel(
         }
     }
 
+    /** 轮次收尾：收口生成态；被停止时补一条可重试的提示段。 */
     private fun finishTurn() {
         _isGenerating.value = false
+        turnJob = null
+        if (stopRequested) {
+            stopRequested = false
+            appendError(STOPPED_MESSAGE)
+        }
         _segments.update { list ->
+            // 空占位 AI 气泡（未产生任何文本）在停止 / 失败后保留提示，去掉空壳。
             list.filterNot { it is ChatSegment.Text && it.role == ChatRole.ASSISTANT && it.content.isEmpty() }
         }
     }
 
-    /** 装配层段推入：同 id 覆盖，新 id 按语义位置插入；确认条镜像到兜底对话框状态。 */
+    /** 装配层段推入：同 id 覆盖，新 id 追加；确认条与错误段顺带更新派生状态。 */
     private fun applySegment(segment: ChatSegment) {
         upsertSegment(segment, placeBeforeAnswer = segment !is ChatSegment.Text)
-        if (segment is ChatSegment.Confirm) {
-            _toolConfirmPending.value = segment.description.takeIf { segment.state == ConfirmSegmentState.PENDING }
+        when (segment) {
+            is ChatSegment.Confirm ->
+                _toolConfirmPending.value = segment.description.takeIf { segment.state == ConfirmSegmentState.PENDING }
+            is ChatSegment.Error -> if (segment.retryable) _canRetry.value = true
+            else -> Unit
         }
     }
 
     /**
-     * 段接入：同 id 覆盖；新段按语义位置插入。工具 / 确认 / 错误段（[placeBeforeAnswer]）
-     * 插到本轮助手答复气泡前——生成步先流式出文字、工具卡片随后才到，终稿答复要排在
-     * 执行链之后；锚点对事件到达顺序不敏感。
+     * 段接入：同 id 覆盖；新段按语义位置插入。
+     *
+     * 工具 / 确认 / 错误段（[placeBeforeAnswer]）插到「本轮助手答复气泡」之前：生成步先流式
+     * 出文字、工具卡片随后才到，终稿答复却要排在执行链之后。锚点取「最后一条用户消息之后
+     * 的第一条助手文本段」，对事件到达顺序不敏感（流式 token 与工具事件可能交错抵达）。
      */
     private fun upsertSegment(segment: ChatSegment, placeBeforeAnswer: Boolean = false) {
         _segments.update { list ->
@@ -160,7 +227,7 @@ class ChatViewModel(
         } ?: list.size
     }
 
-    /** 追加流式片段；生成已结束或片段空时忽略（迟到片段防护）。 */
+    /** 追加流式片段到指定文本段；生成已结束或片段空时忽略（迟到片段防护）。 */
     private fun appendStreaming(segmentId: Long, token: String) {
         if (token.isEmpty() || !_isGenerating.value) return
         _segments.update { list ->
@@ -188,7 +255,8 @@ class ChatViewModel(
     }
 
     private fun appendError(message: String) {
-        upsertSegment(ChatSegment.Error(nextTextId++, message, retryable = true), placeBeforeAnswer = true)
+        _canRetry.value = true
+        upsertSegment(ChatSegment.Error(nextTextId++, message, retryable = true))
     }
 
     /** fake 脚本化回复：按中文语感切 token，仅演示流式逐字渲染。 */
@@ -200,5 +268,8 @@ class ChatViewModel(
 
     companion object {
         const val DEFAULT_TOKEN_INTERVAL_MS = 120L
+
+        /** 停止后的提示文案（错误段复用 [ChatSegment.Error] 以带出重试按钮）。 */
+        const val STOPPED_MESSAGE = "已停止本轮生成，可点「重试」重新发送。"
     }
 }
