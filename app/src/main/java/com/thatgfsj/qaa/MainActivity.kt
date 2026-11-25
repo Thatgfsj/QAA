@@ -2,7 +2,9 @@ package com.thatgfsj.qaa
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -37,6 +39,13 @@ class MainActivity : ComponentActivity() {
     private val restarter: AppRestarter by lazy { ActivityAppRestarter(this) }
     private val runtime: AgentRuntime by lazy { AgentRuntime.create(this) }
 
+    /** 工作区页「从手机目录新建」：SAF 目录选择结果交回运行链登记（#126）。 */
+    private val workspaceTreePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch { runtime.createWorkspaceFromTree(uri) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         runtime.start()
@@ -67,6 +76,8 @@ class MainActivity : ComponentActivity() {
                         systemPrompt = systemPrompt,
                         onSystemPromptSave = ::saveSystemPrompt,
                         onSystemPromptReset = ::resetSystemPrompt,
+                        workspacePort = runtime,
+                        onPickWorkspaceTree = { workspaceTreePicker.launch(null) },
                     )
                 }
                 StartRoute.Terminal -> TerminalHost(

@@ -64,6 +64,8 @@ import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
 import com.thatgfsj.qaa.feature.normal.models.NormalModelEntry
 import com.thatgfsj.qaa.feature.normal.models.NormalModelPort
 import com.thatgfsj.qaa.feature.normal.models.NormalResumeTask
+import com.thatgfsj.qaa.feature.normal.workspace.NormalWorkspaceEntry
+import com.thatgfsj.qaa.feature.normal.workspace.NormalWorkspacePort
 import com.thatgfsj.qaa.feature.terminal.BackendRequest
 import com.thatgfsj.qaa.feature.terminal.LocalModelEntry
 import com.thatgfsj.qaa.feature.terminal.TerminalAgentPort
@@ -83,9 +85,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -122,7 +126,8 @@ class AgentRuntime private constructor(
     TerminalModelListPort,
     TerminalModelPullPort,
     NormalModelPort,
-    TerminalWorkspacePort {
+    TerminalWorkspacePort,
+    NormalWorkspacePort {
 
     private val filesDir: File = appContext.filesDir
     private val modelsDir = File(filesDir, MODELS_DIR)
@@ -829,6 +834,40 @@ class AgentRuntime private constructor(
         is WorkspaceRequest.Remove -> withContext(Dispatchers.IO) {
             workspaceController.remove(request.id, request.force)
         }
+    }
+
+    /** 宿主侧工作区变更事件（SAF 新建结果回执）推给 Normal 页刷新。 */
+    private val workspaceEventsFlow = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    override val workspaceEvents: SharedFlow<String> = workspaceEventsFlow.asSharedFlow()
+
+    override suspend fun workspaceEntries(): List<NormalWorkspaceEntry> = withContext(Dispatchers.IO) {
+        workspaceController.normalEntries()
+    }
+
+    override suspend fun selectWorkspace(id: String): String = switchWorkspaceShared(id)
+
+    override suspend fun createWorkspace(name: String): String =
+        withContext(Dispatchers.IO) { workspaceController.createInternal(name) }
+
+    override suspend fun renameWorkspace(id: String, newName: String): String =
+        withContext(Dispatchers.IO) { workspaceController.rename(id, newName) }
+
+    override suspend fun removeWorkspace(id: String, force: Boolean): String =
+        withContext(Dispatchers.IO) { workspaceController.remove(id, force) }
+
+    /**
+     * SAF 目录选择结果（Normal 端口形态，树 Uri 字符串）：解析后走同一实现，
+     * 让 feature 模块不依赖 Activity 结果 API。
+     */
+    override suspend fun createWorkspaceFromTree(treeUri: String): String =
+        createWorkspaceFromTree(Uri.parse(treeUri))
+
+    /** SAF 目录选择结果（:app 启动器回传）：登记工作区并把回执推回 Normal 页。 */
+    suspend fun createWorkspaceFromTree(uri: Uri): String {
+        val text = withContext(Dispatchers.IO) { workspaceController.createFromTree(uri) }
+        workspaceEventsFlow.tryEmit(text)
+        return text
     }
 
     /**
