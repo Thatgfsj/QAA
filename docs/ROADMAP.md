@@ -12,7 +12,7 @@
 - [ ] Android Kotlin 工程骨架：六模块、minSdk 27、arm64-v8a、Compose、版本目录
 - [ ] 引入 `com.qualcomm.qti:geniex-android:0.10.0` 并验证依赖解析与原生库打包
 - [ ] 双前端持久化切换（ui_mode）与立即重启路由
-- [ ] 内置 Supra2.5-Pro-Instruct (Q4_0) GGUF 到 assets/，首启自动释放，零网络依赖
+- [x] 内置 Supra2.5-Pro-Instruct (Q4_0) GGUF 到 assets/，首启自动释放，零网络依赖（v0.1.6 起收窄为 debug 变体，#124）
 - [ ] GenieX 推理跑通 NPU → HYBRID → GPU（附加档）→ CPU 自动降级链与实际后端回显
 - [ ] 终端 Shell 基础命令：help、model、chat、backend、clear、start window、/exit、/status
 - [ ] 三段式对话布局与统计栏：TTFT、tok/s、已用/总 Token

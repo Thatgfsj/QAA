@@ -68,7 +68,9 @@ class ModelDeleter(
     }
 
     private suspend fun deleteEntry(entry: CatalogEntry): ModelDeleteResult {
-        if (entry.ordinal == 0 || entry.source == ModelSource.BUILT_IN) {
+        // 受保护的是「本版 APK 真的内置」的条目（来源 BUILT_IN，清单固定 0 号）。
+        // #124：release 不再随包内置模型后，目录里同名的历史副本按普通模型列出（0 号起编），必须可删。
+        if (entry.source == ModelSource.BUILT_IN) {
             return ModelDeleteResult.Refused(BUILT_IN_REFUSED)
         }
         val sdkModel = installedSdkModel(entry.path)

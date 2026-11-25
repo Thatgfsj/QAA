@@ -16,12 +16,12 @@
 | 渐进 Skills | 启动仅注入 SKILL.md 名称+一句话描述，命中任务才读全文，保护端侧 Prompt Cache |
 | 系统提示词可编辑 | 终端 `/system` 与 Normal 设置页同一份持久化（#105），保存后下一轮生效、不重载引擎；`/export` 轨迹带提示词来源标记 |
 | 内存互斥 | ModelMemoryCoordinator 状态机强管控，严禁 LLM 与画图模型同时驻留内存 |
-| 内置冒烟模型 | Supra2.5-Pro-Instruct（Q4_0 GGUF，67M 参数）打包进 APK，安装即运行、零网络 |
+| 内置冒烟模型（仅 debug） | Supra2.5-Pro-Instruct（Q4_0 GGUF，67M 参数）只打包进 debug 变体（#124）；release 包不含任何模型，安装后自行导入 |
 
 ## 硬件与边界
 
 - **目标硬件**：骁龙 8 Gen 2 ~ 8 Elite Gen 5（arm64-v8a，minSdk = 27），优先 Hexagon NPU，兼容 Adreno GPU 与 CPU 兜底。
-- **内置冒烟模型**：[liodon-ai/Supra2.5-Pro-Instruct-GGUF](https://huggingface.co/liodon-ai/Supra2.5-Pro-Instruct-GGUF) 的 Q4_0（67M 参数，约 40MB）。定位明确：**仅用于开箱即用、Phase 1 推理链路冒烟测试与保底回退**，不承担 Phase 2 Tool Calling 与上下文压缩验收。
+- **内置冒烟模型（仅 debug 变体）**：[liodon-ai/Supra2.5-Pro-Instruct-GGUF](https://huggingface.co/liodon-ai/Supra2.5-Pro-Instruct-GGUF) 的 Q4_0（67M 参数，约 40MB）。定位明确：**仅用于开箱即用、Phase 1 推理链路冒烟测试与保底回退**。自 v0.1.6（#124）起它只挂到 debug 变体的 `app/src/smoke/assets/models/`，**release 包不再内置任何模型**（APK 少 43.5 MB）；需要离线冒烟就先跑下载脚本并装 debug 包，正式包请自行导入模型。
 - **分级测试策略**：本机模拟器仅验证双前端 UI、重启路由、命令解析、文件沙盒与基础逻辑；3B/4B 级 Q4_0 模型的 NPU 性能实测（TTFT、tok/s、内存峰值）与完整 Agent 闭环走 ADB 连接的骁龙真机。
 
 ## 模块结构
@@ -41,7 +41,8 @@
 
 ```bash
 git clone https://github.com/Thatgfsj/QAA.git && cd QAA
-# 冒烟模型注入脚本随 #5 落地：下载 Supra2.5-Pro-Instruct-Q4_0.gguf 至 app assets
+# 冒烟模型只给 debug 变体：脚本把 Supra2.5-Pro-Instruct-Q4_0.gguf 下载到 app/src/smoke/assets/models/
+# （release 包不内置模型，直接 ./gradlew :app:assembleRelease 即可，产物不含 assets/models/）
 ./scripts/fetch-smoke-model.sh
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk

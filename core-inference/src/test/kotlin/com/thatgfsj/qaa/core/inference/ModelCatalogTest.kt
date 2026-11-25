@@ -174,6 +174,25 @@ class ModelCatalogTest {
         assertEquals("Alpha", catalog.resolveByName("1")?.name)
         assertNull(catalog.resolveByName("missing"))
     }
+
+    @Test
+    fun 不随包内置_同名残留副本按普通模型列出(@TempDir dir: File) = runTest {
+        // #124：release 不再内置模型后，旧版本释放到私有目录的副本必须作为普通条目出现（可删），
+        // 不能被内置身份去重吞掉，也不应再出现 0 号内置占位。
+        val leftover = writeFile(dir, ModelCatalog.BUILT_IN_FILE_NAME, 64)
+        val catalog = ModelCatalog(
+            dir,
+            ioDispatcher = Dispatchers.Unconfined,
+            builtinNames = emptySet(),
+        )
+        val entries = catalog.list()
+        assertEquals(1, entries.size)
+        assertEquals(ModelCatalog.BUILT_IN_NAME, entries[0].name)
+        assertEquals(ModelCatalog.BUILT_IN_QUANTIZATION, entries[0].quantization)
+        assertEquals(ModelSource.IMPORT, entries[0].source)
+        assertEquals(0, entries[0].ordinal)
+        assertEquals(leftover.absolutePath, entries[0].path)
+    }
 }
 private fun writeFile(dir: File, name: String, size: Int): File =
     File(dir, name).apply { writeBytes(ByteArray(size) { index -> (index % 251).toByte() }) }

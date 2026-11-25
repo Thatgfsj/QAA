@@ -14,8 +14,8 @@ android {
         applicationId = "com.thatgfsj.qaa"
         minSdk = 27
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.5"
+        versionCode = 3
+        versionName = "0.1.6"
         // 契约：仅 arm64-v8a（docs/ARCHITECTURE.md 第 1 节）
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -56,6 +56,15 @@ android {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (releaseKeystore.exists()) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    // 冒烟模型只在 debug 变体里打包（#124）：资产由 scripts/fetch-smoke-model.sh 注入
+    // src/smoke/assets/models/，release 不再内置任何 .gguf（APK 少 43.5 MB），
+    // 运行期是否内置由 AndroidAssetSource 实况决定（见 AgentRuntime 的 builtinNames）。
+    sourceSets {
+        getByName("debug") {
+            assets.srcDir("src/smoke/assets")
         }
     }
 

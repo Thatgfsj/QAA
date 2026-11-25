@@ -33,7 +33,7 @@ flock -w 900 /tmp/qaa-gradle.lock ./gradlew clean assembleRelease --console=plai
 # 产物：app/build/outputs/apk/release/app-release.apk
 ```
 
-- 冒烟模型二进制不入库，由构建脚本注入 `assets/models/`（见 `.gitignore`）；缺资产时 release 包会少内置模型，构建前确认脚本已跑。
+- 冒烟模型二进制不入库，由 `scripts/fetch-smoke-model.sh` 注入 `app/src/smoke/assets/models/`，该目录**只挂 debug 变体**（#124）：`assembleRelease` 产物不含 `assets/models/`，无需先跑下载脚本；需要冒烟时构建 debug 包。可用 `unzip -l app-release.apk | grep assets/models` 自检（应为空）。
 - release 为**非 debuggable**：这会影响运行时分支（见 `docs/research/geniex-compat-evidence.md` 的 A 类崩溃），冒烟必须在 release 包上做，不能用 debug 包代替。
 
 ## 4. 安装到真机（保留数据）

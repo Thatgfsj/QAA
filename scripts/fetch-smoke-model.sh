@@ -5,7 +5,8 @@
 #   ./scripts/fetch-smoke-model.sh
 #
 # 将 Supra2.5-Pro-Instruct Q4_0 GGUF（67M 参数，约 40MB）从 HuggingFace 下载至
-# app/src/main/assets/models/，随 APK 打包，实现安装即离线运行；
+# app/src/smoke/assets/models/，该目录只挂到 **debug** 变体（#124）：
+# debug 包带内置模型、安装即可离线冒烟；release 包不再内置任何 .gguf。
 # 该二进制已被 .gitignore（**/assets/models/*.gguf）排除，不会进入版本库。
 #
 # 行为契约：
@@ -19,7 +20,7 @@ set -euo pipefail
 readonly MODEL_URL="https://huggingface.co/liodon-ai/Supra2.5-Pro-Instruct-GGUF/resolve/main/Supra2.5-Pro-Instruct-Q4_0.gguf"
 readonly MODEL_NAME="Supra2.5-Pro-Instruct-Q4_0.gguf"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly TARGET_DIR="${SCRIPT_DIR}/../app/src/main/assets/models"
+readonly TARGET_DIR="${SCRIPT_DIR}/../app/src/smoke/assets/models"
 readonly TARGET="${TARGET_DIR}/${MODEL_NAME}"
 readonly PARTIAL="${TARGET}.part"
 
