@@ -12,6 +12,7 @@
 | 语言与 UI | Kotlin 2.x + Jetpack Compose + Coroutines，Java 17 toolchain | |
 | 推理路径 | GenieX llama_cpp（GGUF），量化优先 Q4_0 | Hexagon NPU 对 Q4_0 算子支持最完整 |
 | 冒烟模型（仅 debug） | Supra2.5-Pro-Instruct **Q4_0 GGUF**（67M，约 40MB），只挂 debug 变体 assets（#124） | HuggingFace：liodon-ai/Supra2.5-Pro-Instruct-GGUF；release 包不内置模型 |
+| 工作区 | 工具沙盒默认根 = 当前工作区（内置目录或 SAF 授权树）；会话按工作区隔离 `files/sessions/<id>/`（#126） | `core-harness/WorkspaceStore` + `core-tools/LocalSandboxFs.replaceRoots` + `:app/WorkspaceController` |
 | 上下文长度 | 默认 **32768**；档位 4096 / 8192 / 16384 / 32768（DataStore `context_length`） | 预算 = nCtx − 输出预留 512 − 安全边界 max(128, ceil(2%·nCtx))（32768→31600）；压缩触发/目标水位 0.8 / 0.5；>8192 只保存不自动重载（HTP 长上下文 abort 风险，真机已验 32768@NPU 可载入） |
 | 目标硬件 | 骁龙 8 Gen 2 ~ 8 Elite Gen 5 | 模拟器仅验 UI/逻辑 |
 | 参考实现 | github.com/qualcomm/ai-hub-apps → `geniex_chat_android` | 官方参考 App |
