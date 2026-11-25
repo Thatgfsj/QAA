@@ -6,7 +6,6 @@ import com.thatgfsj.qaa.core.harness.AgentConfig
 import com.thatgfsj.qaa.core.harness.AgentLoop
 import com.thatgfsj.qaa.core.harness.CompactionResult
 import com.thatgfsj.qaa.core.harness.CompactionTrigger
-import com.thatgfsj.qaa.core.harness.ConfirmationDecision
 import com.thatgfsj.qaa.core.harness.ConfirmationGate
 import com.thatgfsj.qaa.core.harness.ContextCompactor
 import com.thatgfsj.qaa.core.harness.ContextWindow
@@ -21,7 +20,6 @@ import com.thatgfsj.qaa.core.harness.SteerQueue
 import com.thatgfsj.qaa.core.harness.SteerTurnDriver
 import com.thatgfsj.qaa.core.harness.ToolCall
 import com.thatgfsj.qaa.core.harness.TreeSessionStore
-import com.thatgfsj.qaa.core.harness.summarizeToolCall
 import com.thatgfsj.qaa.core.inference.AndroidAssetSource
 import com.thatgfsj.qaa.core.inference.AssetModelReleaser
 import com.thatgfsj.qaa.core.inference.ComputeBackend
@@ -56,6 +54,7 @@ import com.thatgfsj.qaa.data.SystemPromptStore
 import com.thatgfsj.qaa.data.dataStoreContextLengthStore
 import com.thatgfsj.qaa.data.dataStoreSystemPromptStore
 import com.thatgfsj.qaa.feature.normal.chat.ChatMetrics
+import com.thatgfsj.qaa.feature.normal.chat.ChatSegment
 import com.thatgfsj.qaa.feature.normal.chat.NormalAgentPort
 import com.thatgfsj.qaa.feature.normal.models.NormalDownloadState
 import com.thatgfsj.qaa.feature.normal.models.NormalModelEntry
@@ -208,13 +207,18 @@ class AgentRuntime private constructor(
         limits = ToolLimits(),
         executors = ToolRouterGateway.defaultExecutors(drawImageTool),
     )
-    private val gate = DelegatingConfirmationGate()
+    /** Normal 会话页时间线桥（#127）：确认挂起 / 工具执行 / 轮次错误 → 段更新流。 */
+    private val normalTurnBridge = NormalTurnBridge()
+    private val gate = DelegatingConfirmationGate(
+        onPending = normalTurnBridge::toolPending,
+        onResolved = normalTurnBridge::confirmResolved,
+    )
 
     private val loop = AgentLoop(
         // 手机端默认关闭 YOLO（AgentConfig 契约），非 YOLO 走确认门。
         config = AgentConfig(yoloMode = false, maxToolSteps = MAX_TOOL_STEPS),
         engine = llmGateway,
-        tools = toolGateway,
+        tools = NormalToolObserver(toolGateway, normalTurnBridge),
         gate = gate,
         recorder = recorder,
         assembler = promptAssembler,
@@ -649,7 +653,13 @@ class AgentRuntime private constructor(
 
     override suspend fun ask(text: String): String {
         if (!ensureReady()) return "模型尚未就绪：${_status.value}"
-        executeTurn(text)
+        // 轮次前后收口时间线桥：beginTurn 清上轮挂起态，endTurn 把中途停止的卡片标记为中止。
+        normalTurnBridge.beginTurn()
+        try {
+            executeTurn(text)
+        } finally {
+            normalTurnBridge.endTurn()
+        }
         return recorder.turnAssistantText().ifBlank { "（本轮没有文字答复）" }
     }
 
@@ -666,6 +676,9 @@ class AgentRuntime private constructor(
             contextTokens = snapshot.contextTokens,
         )
     }
+
+    /** Normal 会话页时间线（#127）：工具卡片 / 确认条 / 错误段的 upsert 流。 */
+    override val chatSegments: Flow<ChatSegment> = normalTurnBridge.segments
 
     // ---- TerminalModelListPort / TerminalModelPullPort ----
 
@@ -798,7 +811,10 @@ class AgentRuntime private constructor(
             throw cancelled
         } catch (error: Exception) {
             AppLog.error(ERROR_TURN, error.message ?: error::class.simpleName.orEmpty())
-            emitNotice("本轮执行失败：${error.message ?: error::class.simpleName}")
+            val failure = "本轮执行失败：${error.message ?: error::class.simpleName}"
+            emitNotice(failure)
+            // Normal 会话页需要独立错误段（终端回显走 emitNotice，两条路径互不影响）。
+            normalTurnBridge.turnFailed(failure)
         } finally {
             runCatching { safePointCompact() }
             // 异常中断也要收口当前流式行：保留已生成片段，不留下「生成中」形态。
@@ -1071,26 +1087,3 @@ class AgentRuntime private constructor(
     }
 }
 
-/**
- * 确认门委派：运行时构造早于 UI，确认门由具体前端在组合期注入
- * （终端 [com.thatgfsj.qaa.feature.terminal.TerminalUiGate] / Normal NormalGate）。
- * 未注入时按拒绝处理，绝不静默放行写类工具。
- */
-private class DelegatingConfirmationGate : ConfirmationGate {
-
-    @Volatile
-    private var delegate: ConfirmationGate? = null
-
-    fun bind(gate: ConfirmationGate) {
-        delegate = gate
-    }
-
-    override suspend fun awaitConfirmation(call: ToolCall): ConfirmationDecision {
-        val decision = delegate?.awaitConfirmation(call) ?: ConfirmationDecision.DENY
-        AppLog.confirmDecision(
-            description = summarizeToolCall(call),
-            allowed = decision == ConfirmationDecision.ALLOW,
-        )
-        return decision
-    }
-}
